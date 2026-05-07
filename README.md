@@ -13,6 +13,8 @@ Model Context Protocol (MCP) server that exposes CocktailPi backend operations a
 Required tools:
 - `list_recipes`: list defined cocktails/recipes, with optional full details.
 - `create_recipe`: add a new recipe.
+- `update_recipe`: update an existing recipe.
+- `delete_recipe`: delete a recipe.
 - `list_pumps`: list attached pumps including currently configured ingredient/drink.
 
 Additional helper tools:
@@ -29,6 +31,8 @@ This MCP server calls these CocktailPi endpoints:
 - `GET /api/recipe/`
 - `GET /api/recipe/{id}`
 - `POST /api/recipe/` (multipart with `recipe` part)
+- `PUT /api/recipe/{id}` (multipart with `recipe` part)
+- `DELETE /api/recipe/{id}`
 - `GET /api/pump/`
 - `GET /api/ingredient/`
 - `GET /api/category/`
@@ -40,7 +44,8 @@ This MCP server calls these CocktailPi endpoints:
 - Network access to CocktailPi backend (default `http://localhost:8080`)
 - CocktailPi user with permissions:
   - read recipes/pumps/ingredients (for list tools)
-  - `RECIPE_CREATOR` role for creating recipes
+  - `RECIPE_CREATOR` role for creating/updating recipes
+  - owner or `ADMIN` role for deleting recipes (as enforced by CocktailPi)
 
 ## Local setup
 

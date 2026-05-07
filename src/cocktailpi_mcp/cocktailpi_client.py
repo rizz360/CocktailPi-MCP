@@ -89,6 +89,31 @@ class CocktailPiClient:
             files=multipart_form,
         )
 
+    async def update_recipe(
+        self,
+        token: str,
+        recipe_id: int,
+        recipe: dict[str, Any],
+        remove_image: bool = False,
+    ) -> dict[str, Any]:
+        multipart_form = {
+            "recipe": (None, json.dumps(recipe), "application/json")
+        }
+        return await self._request(
+            "PUT",
+            f"/api/recipe/{recipe_id}",
+            token=token,
+            params={"removeImage": str(remove_image).lower()},
+            files=multipart_form,
+        )
+
+    async def delete_recipe(self, token: str, recipe_id: int) -> dict[str, Any]:
+        return await self._request(
+            "DELETE",
+            f"/api/recipe/{recipe_id}",
+            token=token,
+        )
+
     async def list_pumps(self, token: str) -> list[dict[str, Any]]:
         data = await self._request("GET", "/api/pump/", token=token)
         if not isinstance(data, list):

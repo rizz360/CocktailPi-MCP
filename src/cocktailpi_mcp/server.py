@@ -106,6 +106,33 @@ async def create_recipe(recipe_json: dict[str, Any], token: str | None = None) -
     return await client.create_recipe(auth_token, recipe_json)
 
 
+@mcp.tool(
+    description=(
+        "Update an existing CocktailPi recipe by id. "
+        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+    )
+)
+async def update_recipe(
+    recipe_id: int,
+    recipe_json: dict[str, Any],
+    token: str | None = None,
+    remove_image: bool = False,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    return await client.update_recipe(
+        auth_token,
+        recipe_id=recipe_id,
+        recipe=recipe_json,
+        remove_image=remove_image,
+    )
+
+
+@mcp.tool(description="Delete a CocktailPi recipe by id.")
+async def delete_recipe(recipe_id: int, token: str | None = None) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    return await client.delete_recipe(auth_token, recipe_id)
+
+
 @mcp.tool(description="List pumps and their currently configured ingredients.")
 async def list_pumps(token: str | None = None) -> list[dict[str, Any]]:
     auth_token = _resolve_token(token)
