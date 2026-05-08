@@ -44,7 +44,7 @@ services:
       COCKTAILPI_TIMEOUT_SECONDS: 20
 ```
 
-  Do not run `docker compose up` for normal MCP usage.
+Do not run `docker compose up` for normal MCP usage.
 
 ### 3) Connect your AI client
 
@@ -137,6 +137,7 @@ Helper operations:
 - Auth errors usually mean wrong credentials/token or missing permissions.
 - If your AI client cannot run `docker compose`, use the direct `docker run` config shown above.
 - If you started this with `docker compose up`, stop it and use the MCP client config instead.
+- `no matching manifest for linux/arm64/v8` means the published tag does not include Apple Silicon yet. Use `--platform linux/amd64` in docker args as a temporary workaround, then remove it after a multi-arch release is published.
 
 ## Advanced reference
 
