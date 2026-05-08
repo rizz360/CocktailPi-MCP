@@ -29,9 +29,23 @@ mcp = FastMCP(
     "CocktailPi MCP",
     instructions=(
         "MCP tools for CocktailPi recipe and pump operations. "
-        "Use login first to get an access token, or configure COCKTAILPI_ACCESS_TOKEN "
-        "or COCKTAILPI_USERNAME + COCKTAILPI_PASSWORD for auto-login."
+        "The token parameter on tools is optional: when omitted, the server falls back "
+        "to the configured token or startup auto-login token. "
+        "Use login only when you need to fetch/refresh a token explicitly. "
+        "For recipe writes, use categoryIds (not categories), include ownerId, and keep "
+        "stepIngredients flat with ingredientId + ingredientType fields."
     ),
+)
+
+TOKEN_HELP = (
+    "token is optional. If omitted, server uses configured "
+    "COCKTAILPI_ACCESS_TOKEN or startup auto-login token."
+)
+
+RECIPE_MINIMAL_SHAPE_HELP = (
+    "recipe_json must include ownerId and categoryIds (empty list allowed). "
+    "For ingredient steps, each entry must be flat fields like ingredientId and "
+    "ingredientType (not nested ingredient object)."
 )
 
 
@@ -45,7 +59,12 @@ def _resolve_token(explicit_token: str | None) -> str:
     return token
 
 
-@mcp.tool(description="Authenticate against CocktailPi and return JWT token details.")
+@mcp.tool(
+    description=(
+        "Authenticate against CocktailPi and return JWT token details. "
+        "Most tools do not require this call if server token fallback is configured."
+    )
+)
 async def login(username: str, password: str, remember: bool = True) -> dict[str, Any]:
     result = await client.login(username=username, password=password, remember=remember)
     return {
@@ -60,7 +79,8 @@ async def login(username: str, password: str, remember: bool = True) -> dict[str
 @mcp.tool(
     description=(
         "List CocktailPi recipes (search results). "
-        "Set include_details=true to fetch full details for each returned recipe."
+        "Set include_details=true to fetch full details for each returned recipe. "
+        f"{TOKEN_HELP}"
     )
 )
 async def list_recipes(
@@ -103,7 +123,7 @@ async def list_recipes(
     return recipes_page
 
 
-@mcp.tool(description="Get a single CocktailPi recipe by id.")
+@mcp.tool(description=f"Get a single CocktailPi recipe by id. {TOKEN_HELP}")
 async def get_recipe(
     recipe_id: int,
     token: str | None = None,
@@ -116,8 +136,16 @@ async def get_recipe(
 @mcp.tool(
     description=(
         "Create a new CocktailPi recipe. "
-        "The recipe_json argument must match CocktailPi recipe create DTO structure. "
-        "Optional image_base64 can be provided to set the recipe image during creation."
+        f"{RECIPE_MINIMAL_SHAPE_HELP} "
+        "Minimal recipe_json example: "
+        "{\"name\":\"New Drink\",\"ownerId\":1,\"categoryIds\":[],"
+        "\"productionSteps\":[{\"type\":\"addIngredients\","
+        "\"stepIngredients\":[{\"ingredientId\":10,"
+        "\"ingredientType\":\"<valid-type-from-backend>\"," 
+        "\"amount\":50,\"scale\":true,\"boostable\":false}]}]}. "
+        "Tip: obtain a valid ingredientType by inspecting an existing recipe via get_recipe. "
+        "Optional image_base64 can be provided to set the recipe image during creation. "
+        f"{TOKEN_HELP}"
     )
 )
 async def create_recipe(
@@ -140,8 +168,9 @@ async def create_recipe(
 @mcp.tool(
     description=(
         "Update an existing CocktailPi recipe by id. "
-        "The recipe_json argument must match CocktailPi recipe create DTO structure. "
-        "Use image_base64 to add/replace image and remove_image=true to delete image."
+        f"{RECIPE_MINIMAL_SHAPE_HELP} "
+        "Use image_base64 to add/replace image and remove_image=true to delete image. "
+        f"{TOKEN_HELP}"
     )
 )
 async def update_recipe(
@@ -168,7 +197,8 @@ async def update_recipe(
 @mcp.tool(
     description=(
         "Add or replace the image of an existing CocktailPi recipe. "
-        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+        f"{RECIPE_MINIMAL_SHAPE_HELP} "
+        f"{TOKEN_HELP}"
     )
 )
 async def add_or_update_recipe_image(
@@ -193,7 +223,8 @@ async def add_or_update_recipe_image(
 @mcp.tool(
     description=(
         "Delete the image of an existing CocktailPi recipe. "
-        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+        f"{RECIPE_MINIMAL_SHAPE_HELP} "
+        f"{TOKEN_HELP}"
     )
 )
 async def delete_recipe_image(
@@ -209,13 +240,13 @@ async def delete_recipe_image(
     )
 
 
-@mcp.tool(description="Delete a CocktailPi recipe by id.")
+@mcp.tool(description=f"Delete a CocktailPi recipe by id. {TOKEN_HELP}")
 async def delete_recipe(recipe_id: int, token: str | None = None) -> dict[str, Any]:
     auth_token = _resolve_token(token)
     return await client.delete_recipe(auth_token, recipe_id)
 
 
-@mcp.tool(description="List pumps and their currently configured ingredients.")
+@mcp.tool(description=f"List pumps and their currently configured ingredients. {TOKEN_HELP}")
 async def list_pumps(token: str | None = None) -> list[dict[str, Any]]:
     auth_token = _resolve_token(token)
     pumps = await client.list_pumps(auth_token)
@@ -237,7 +268,12 @@ async def list_pumps(token: str | None = None) -> list[dict[str, Any]]:
     return normalized
 
 
-@mcp.tool(description="List ingredients to help build recipe payloads.")
+@mcp.tool(
+    description=(
+        "List ingredients to help build recipe payloads, including valid ids and types. "
+        f"{TOKEN_HELP}"
+    )
+)
 async def list_ingredients(
     token: str | None = None,
     autocomplete: str | None = None,
@@ -251,13 +287,13 @@ async def list_ingredients(
     )
 
 
-@mcp.tool(description="List recipe categories.")
+@mcp.tool(description=f"List recipe categories. {TOKEN_HELP}")
 async def list_categories(token: str | None = None) -> list[dict[str, Any]]:
     auth_token = _resolve_token(token)
     return await client.list_categories(auth_token)
 
 
-@mcp.tool(description="List glasses.")
+@mcp.tool(description=f"List glasses. {TOKEN_HELP}")
 async def list_glasses(token: str | None = None) -> list[dict[str, Any]]:
     auth_token = _resolve_token(token)
     return await client.list_glasses(auth_token)

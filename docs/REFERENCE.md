@@ -4,6 +4,11 @@ This page contains deeper technical details that are not required for first-time
 
 ## Tool reference
 
+Authentication behavior:
+- Every tool's `token` parameter is optional.
+- If `token` is omitted, server uses configured `COCKTAILPI_ACCESS_TOKEN` or startup auto-login token.
+- `login` is only required when you need to fetch/refresh a token explicitly.
+
 Core operations:
 - `list_recipes`: list recipes/cocktails
 - `create_recipe`: create a new recipe
@@ -62,6 +67,11 @@ This MCP server calls these CocktailPi endpoints:
 ```
 
 Use `list_ingredients`, `list_categories`, and `list_glasses` to discover valid ids.
+
+Common gotchas when creating/updating recipes:
+- Use `categoryIds` (not `categories`) and include it even if empty (`[]`).
+- Include `ownerId` explicitly.
+- Ingredient entries must be flat fields like `ingredientId` and `ingredientType` (not nested ingredient object).
 
 ## Image operations
 

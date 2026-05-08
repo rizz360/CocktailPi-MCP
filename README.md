@@ -138,6 +138,41 @@ Image notes:
 - `image_base64` can be raw base64 bytes or a data URL (for example `data:image/png;base64,...`).
 - CocktailPi image updates use the recipe update endpoint, so image-only tools still require a valid `recipe_json` payload.
 
+Auth behavior notes:
+- Every tool's `token` parameter is optional.
+- If `token` is omitted, the MCP server automatically falls back to configured `COCKTAILPI_ACCESS_TOKEN` or startup auto-login token.
+- Call `login` only if you need to fetch/refresh a token explicitly.
+
+Minimal `create_recipe` payload pattern:
+
+```json
+{
+  "name": "New Drink",
+  "ownerId": 1,
+  "categoryIds": [],
+  "productionSteps": [
+    {
+      "type": "addIngredients",
+      "stepIngredients": [
+        {
+          "ingredientId": 10,
+          "ingredientType": "<valid-type-from-backend>",
+          "amount": 50,
+          "scale": true,
+          "boostable": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+Payload gotchas:
+- Use `categoryIds` (not `categories`) and include it even if empty.
+- Keep ingredient entries flat using `ingredientId` and `ingredientType` (not nested ingredient object).
+- `ingredientType` values are backend-defined; use `get_recipe` on an existing recipe to copy a valid value.
+- Include `ownerId` explicitly.
+
 ## Troubleshooting
 
 - Connection errors usually mean `COCKTAILPI_BASE_URL` is not reachable from Docker.
@@ -149,6 +184,7 @@ Image notes:
 ## Advanced reference
 
 Detailed endpoint mapping and recipe payload examples are in [docs/REFERENCE.md](docs/REFERENCE.md).
+AI call-shape quick guide is in [SKILL.md](SKILL.md).
 
 ## Development
 
