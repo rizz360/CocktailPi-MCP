@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.5.1...v0.6.0) (2026-05-08)
+
+
+### Features
+
+* add analyze_pump_ingredient_optimization tool for recipe automation analysis ([3979835](https://github.com/rizz360/CocktailPi-MCP/commit/39798354e346c4e55ab9d68b3ede2e419164ec1f))
+* add optimized pump configuration suggestion and ingredient evaluation logic ([0a71679](https://github.com/rizz360/CocktailPi-MCP/commit/0a7167918c1e6051a26448da47eaba7d21728697))
+* enhance ingredient group ID collection to support ancestor expansion ([e76819c](https://github.com/rizz360/CocktailPi-MCP/commit/e76819c04f92aa40f586084a4ec0f9635ade2524))
+* enhance pump ingredient optimization with new matching logic and ingredient type handling ([d0fa000](https://github.com/rizz360/CocktailPi-MCP/commit/d0fa0005f9a7f7024ef65e4fbd6d541441d3c507))
+* improve step ingredient group ID extraction for explicit group requirements ([db088be](https://github.com/rizz360/CocktailPi-MCP/commit/db088bef92de2db29ccfc63eeab221245b958df3))
+* refine step ingredient group ID extraction for explicit group requirements ([d545e66](https://github.com/rizz360/CocktailPi-MCP/commit/d545e662ff4ef50b2dbb9a32d41e01929f8d6f55))
+
 ## [0.5.1](https://github.com/rizz360/CocktailPi-MCP/compare/v0.5.0...v0.5.1) (2026-05-08)
 
 
