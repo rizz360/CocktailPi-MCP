@@ -184,7 +184,6 @@ Payload gotchas:
 ## Advanced reference
 
 Detailed endpoint mapping and recipe payload examples are in [docs/REFERENCE.md](docs/REFERENCE.md).
-AI call-shape quick guide is in [SKILL.md](SKILL.md).
 
 ## Development
 
