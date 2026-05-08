@@ -10,7 +10,9 @@ This README focuses on getting it running fast for end users.
 
 ## Quick start
 
-This MCP server is started on demand by your AI client (stdio). It is not a background web service you keep running with `docker compose up -d`.
+This MCP server is started on demand by your AI client (stdio).
+
+You do **not** run this as a long-lived container with `docker compose up -d`.
 
 ### 1) Have CocktailPi running
 
@@ -21,36 +23,19 @@ You need:
 - A backend URL (for example `http://cocktailpi/`, `http://localhost:8080`, or your Tailscale/LAN URL)
 - Credentials or a JWT token
 
-### 2) Set connection values
-
-Use [docker-compose.yml](docker-compose.yml) as a config template and edit the environment section:
-
-```yaml
-services:
-  cocktailpi-mcp:
-    image: ghcr.io/rizz360/cocktailpi-mcp:latest
-    stdin_open: true
-    tty: true
-    environment:
-      COCKTAILPI_BASE_URL: http://cocktailpi/
-
-      # Option A: username/password auto-login
-      COCKTAILPI_USERNAME: your-username
-      COCKTAILPI_PASSWORD: your-password
-
-      # Option B: static JWT token (use instead of username/password)
-      # COCKTAILPI_ACCESS_TOKEN: your-jwt-token
-
-      COCKTAILPI_TIMEOUT_SECONDS: 20
-```
-
-Do not run `docker compose up` for normal MCP usage.
-
-### 3) Connect your AI client
+### 2) Add it to your AI client
 
 Most MCP clients accept an `mcpServers` command-based config.
 
-Important: this server uses stdio transport, so your AI client launches the command below and communicates over that process's stdin/stdout.
+Important: this server uses stdio transport, so your AI client launches the command and communicates over that process's stdin/stdout.
+
+Use these values in the command args:
+- `COCKTAILPI_BASE_URL`: your CocktailPi backend URL
+- Option A: `COCKTAILPI_USERNAME` + `COCKTAILPI_PASSWORD`
+- Option B: `COCKTAILPI_ACCESS_TOKEN` (instead of username/password)
+- Optional: `COCKTAILPI_TIMEOUT_SECONDS=20`
+
+### 3) Copy-paste config examples
 
 #### Claude Desktop (macOS)
 
@@ -62,7 +47,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "cocktailpi": {
       "command": "docker",
       "args": [
-        "run", "--rm", "-i",
+        "run", "--rm", "-i", "--pull", "always",
         "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
         "-e", "COCKTAILPI_USERNAME=your-username",
         "-e", "COCKTAILPI_PASSWORD=your-password",
@@ -79,24 +64,11 @@ Put your credentials in the `-e` values above, or replace username/password with
 "-e", "COCKTAILPI_ACCESS_TOKEN=your-jwt-token"
 ```
 
+The `"--pull", "always"` args ensure each launch checks for the newest image.
+
 #### Cursor
 
-Create or edit `.cursor/mcp.json` in your project (works when Cursor is opened in this repository):
-
-```json
-{
-  "mcpServers": {
-    "cocktailpi": {
-      "command": "docker",
-      "args": ["compose", "run", "--rm", "-T", "cocktailpi-mcp"]
-    }
-  }
-}
-```
-
-#### Other MCP clients
-
-If your client cannot run `docker compose`, use a direct image command:
+Create or edit `.cursor/mcp.json`:
 
 ```json
 {
@@ -104,7 +76,28 @@ If your client cannot run `docker compose`, use a direct image command:
     "cocktailpi": {
       "command": "docker",
       "args": [
-        "run", "--rm", "-i",
+        "run", "--rm", "-i", "--pull", "always",
+        "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
+        "-e", "COCKTAILPI_USERNAME=your-username",
+        "-e", "COCKTAILPI_PASSWORD=your-password",
+        "ghcr.io/rizz360/cocktailpi-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+#### Other MCP clients
+
+Use a direct image command like this:
+
+```json
+{
+  "mcpServers": {
+    "cocktailpi": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i", "--pull", "always",
         "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
         "-e", "COCKTAILPI_USERNAME=your-username",
         "-e", "COCKTAILPI_PASSWORD=your-password",
@@ -177,9 +170,16 @@ Payload gotchas:
 
 - Connection errors usually mean `COCKTAILPI_BASE_URL` is not reachable from Docker.
 - Auth errors usually mean wrong credentials/token or missing permissions.
-- If your AI client cannot run `docker compose`, use the direct `docker run` config shown above.
-- If you started this with `docker compose up`, stop it and use the MCP client config instead.
+- If you started this with `docker compose up`, stop it and use MCP client config that runs `docker run` on demand.
 - `no matching manifest for linux/arm64/v8` means the published tag does not include Apple Silicon yet. Use `--platform linux/amd64` in docker args as a temporary workaround, then remove it after a multi-arch release is published.
+
+## Optional: use docker-compose.yml as a value template
+
+Most users can skip this section.
+
+The [docker-compose.yml](docker-compose.yml) file is mainly a convenient place to keep environment values together while testing. For normal MCP usage, your AI client still launches the server process directly.
+
+If you prefer, copy env values from `docker-compose.yml` into your MCP client args (`-e KEY=value`).
 
 ## Advanced reference
 
