@@ -1373,6 +1373,55 @@ async def list_ingredients(
     )
 
 
+@mcp.tool(
+    description=(
+        "Set whether a CocktailPi ingredient is currently in bar. "
+        "This wraps CocktailPi's ingredient bar endpoints so inventory can be updated "
+        "before pump optimization runs. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def set_ingredient_in_bar(
+    ingredient_id: int,
+    in_bar: bool,
+    token: str | None = None,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    return await client.set_ingredient_in_bar(auth_token, ingredient_id=ingredient_id, in_bar=in_bar)
+
+
+@mcp.tool(
+    description=(
+        "Bulk update CocktailPi ingredient bar state. "
+        "Useful after image-based inventory detection so multiple ingredients can be "
+        "marked present or absent in one MCP call. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def set_ingredients_in_bar(
+    ingredient_ids: list[int],
+    in_bar: bool,
+    token: str | None = None,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    unique_ids = sorted({ingredient_id for ingredient_id in ingredient_ids if isinstance(ingredient_id, int)})
+    if not unique_ids:
+        raise CocktailPiApiError("ingredient_ids must contain at least one integer id")
+
+    results = []
+    for ingredient_id in unique_ids:
+        results.append(
+            await client.set_ingredient_in_bar(auth_token, ingredient_id=ingredient_id, in_bar=in_bar)
+        )
+
+    return {
+        "updatedCount": len(results),
+        "inBar": in_bar,
+        "ingredientIds": unique_ids,
+        "results": results,
+    }
+
+
 @mcp.tool(description=f"List recipe categories. {TOKEN_HELP}")
 async def list_categories(token: str | None = None) -> list[dict[str, Any]]:
     auth_token = _resolve_token(token)

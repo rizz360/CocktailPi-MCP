@@ -233,6 +233,15 @@ class CocktailPiClient:
             raise CocktailPiApiError("Unexpected ingredient response format")
         return data
 
+    async def set_ingredient_in_bar(self, token: str, ingredient_id: int, in_bar: bool) -> dict[str, Any]:
+        method = "PUT" if in_bar else "DELETE"
+        await self._request(method, f"/api/ingredient/{ingredient_id}/bar", token=token)
+        return {
+            "ingredientId": ingredient_id,
+            "inBar": in_bar,
+            "status": "updated",
+        }
+
     async def list_categories(self, token: str) -> list[dict[str, Any]]:
         data = await self._request("GET", "/api/category/", token=token)
         if not isinstance(data, list):
