@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.2.0...v0.3.0) (2026-05-08)
+
+
+### Features
+
+* update README and Docker Compose to use published image from GHCR ([7f01a1f](https://github.com/rizz360/CocktailPi-MCP/commit/7f01a1f74489bab2bab20e293e70621b2471e59f))
+* update workflows to set up QEMU and support multi-platform builds ([0495c3a](https://github.com/rizz360/CocktailPi-MCP/commit/0495c3ac9e6201ecee2cd2ef1c85c41e720119b9))
+
+
+### Documentation
+
+* add CONTRIBUTING.md and update README for local development setup ([419fff8](https://github.com/rizz360/CocktailPi-MCP/commit/419fff8841abf5ebb8e079e4448e9eeed89bf477))
+* clarify MCP server usage instructions and update connection setup details ([fcc1099](https://github.com/rizz360/CocktailPi-MCP/commit/fcc10995e63d8c0e4a51dd9fdcacd17e4805fec4))
+* update Claude configuration instructions with environment variables for credentials ([9c3269b](https://github.com/rizz360/CocktailPi-MCP/commit/9c3269bf6dc8c0e5f2ab16923f444a5a466f5a77))
+* update README for improved quick start instructions and add advanced reference documentation ([64a0660](https://github.com/rizz360/CocktailPi-MCP/commit/64a0660d12ada1099ae65fcad12d1a5b2e4d12d7))
+
 ## [0.2.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.1.0...v0.2.0) (2026-05-08)
 
 
