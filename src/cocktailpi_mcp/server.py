@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import cairosvg
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from cocktailpi_mcp.cocktailpi_client import CocktailPiApiError, CocktailPiClient
@@ -48,6 +50,16 @@ RECIPE_MINIMAL_SHAPE_HELP = (
     "ingredientType (not nested ingredient object)."
 )
 
+IMAGE_FETCH_MAX_BYTES = 8 * 1024 * 1024
+ALLOWED_REMOTE_IMAGE_CONTENT_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+}
+
 
 def _resolve_token(explicit_token: str | None) -> str:
     token = (explicit_token or _resolved_token or "").strip()
@@ -57,6 +69,101 @@ def _resolve_token(explicit_token: str | None) -> str:
             "or set COCKTAILPI_USERNAME + COCKTAILPI_PASSWORD."
         )
     return token
+
+
+def _coerce_recipe_to_write_payload(recipe_detail: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+
+    name = recipe_detail.get("name")
+    if isinstance(name, str) and name.strip():
+        payload["name"] = name
+
+    owner_id = recipe_detail.get("ownerId")
+    if not isinstance(owner_id, int):
+        owner = recipe_detail.get("owner")
+        if isinstance(owner, dict) and isinstance(owner.get("id"), int):
+            owner_id = owner["id"]
+    if isinstance(owner_id, int):
+        payload["ownerId"] = owner_id
+
+    category_ids = recipe_detail.get("categoryIds")
+    if isinstance(category_ids, list) and all(isinstance(x, int) for x in category_ids):
+        payload["categoryIds"] = category_ids
+    else:
+        categories = recipe_detail.get("categories")
+        if isinstance(categories, list):
+            derived_ids = [c.get("id") for c in categories if isinstance(c, dict) and isinstance(c.get("id"), int)]
+            payload["categoryIds"] = derived_ids
+        else:
+            payload["categoryIds"] = []
+
+    production_steps = recipe_detail.get("productionSteps")
+    if isinstance(production_steps, list):
+        payload["productionSteps"] = production_steps
+
+    description = recipe_detail.get("description")
+    if isinstance(description, str):
+        payload["description"] = description
+
+    default_glass_id = recipe_detail.get("defaultGlassId")
+    if not isinstance(default_glass_id, int):
+        default_glass = recipe_detail.get("defaultGlass")
+        if isinstance(default_glass, dict) and isinstance(default_glass.get("id"), int):
+            default_glass_id = default_glass["id"]
+    if isinstance(default_glass_id, int):
+        payload["defaultGlassId"] = default_glass_id
+
+    return payload
+
+
+async def _resolve_recipe_payload_for_image_update(
+    auth_token: str,
+    recipe_id: int,
+    recipe_json: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if recipe_json is not None:
+        return recipe_json
+
+    existing = await client.get_recipe(auth_token, recipe_id, is_ingredient=False)
+    payload = _coerce_recipe_to_write_payload(existing)
+
+    if not isinstance(payload.get("ownerId"), int):
+        raise CocktailPiApiError(
+            "ownerId is required for recipe updates. Provide recipe_json with ownerId explicitly."
+        )
+    if "categoryIds" not in payload:
+        payload["categoryIds"] = []
+    if not isinstance(payload.get("productionSteps"), list):
+        payload["productionSteps"] = []
+
+    return payload
+
+
+async def _download_image_bytes(image_url: str) -> tuple[bytes, str]:
+    try:
+        async with httpx.AsyncClient(timeout=settings.timeout_seconds, follow_redirects=True) as http:
+            response = await http.get(image_url)
+    except httpx.HTTPError as exc:
+        raise CocktailPiApiError(f"Failed to download image_url: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise CocktailPiApiError(f"Failed to download image_url: HTTP {response.status_code}")
+
+    content_type_header = response.headers.get("content-type", "").lower()
+    content_type = content_type_header.split(";", 1)[0].strip()
+    if content_type not in ALLOWED_REMOTE_IMAGE_CONTENT_TYPES:
+        raise CocktailPiApiError(
+            "image_url content-type must be one of: "
+            + ", ".join(sorted(ALLOWED_REMOTE_IMAGE_CONTENT_TYPES))
+        )
+
+    raw = response.content
+    if not raw:
+        raise CocktailPiApiError("Downloaded image is empty")
+    if len(raw) > IMAGE_FETCH_MAX_BYTES:
+        raise CocktailPiApiError(f"Downloaded image exceeds max size of {IMAGE_FETCH_MAX_BYTES} bytes")
+
+    return raw, content_type
 
 
 @mcp.tool(
@@ -203,17 +310,20 @@ async def update_recipe(
 )
 async def add_or_update_recipe_image(
     recipe_id: int,
-    recipe_json: dict[str, Any],
-    image_base64: str,
+    image_base64: str | None = None,
+    recipe_json: dict[str, Any] | None = None,
     token: str | None = None,
     image_filename: str = "recipe.jpg",
     image_content_type: str = "image/jpeg",
 ) -> dict[str, Any]:
     auth_token = _resolve_token(token)
+    if not image_base64:
+        raise CocktailPiApiError("image_base64 is required")
+    payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
     return await client.add_or_update_recipe_image(
         auth_token,
         recipe_id=recipe_id,
-        recipe=recipe_json,
+        recipe=payload,
         image_base64=image_base64,
         image_filename=image_filename,
         image_content_type=image_content_type,
@@ -229,14 +339,85 @@ async def add_or_update_recipe_image(
 )
 async def delete_recipe_image(
     recipe_id: int,
-    recipe_json: dict[str, Any],
+    recipe_json: dict[str, Any] | None = None,
     token: str | None = None,
 ) -> dict[str, Any]:
     auth_token = _resolve_token(token)
+    payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
     return await client.delete_recipe_image(
         auth_token,
         recipe_id=recipe_id,
-        recipe=recipe_json,
+        recipe=payload,
+    )
+
+
+@mcp.tool(
+    description=(
+        "Add or replace recipe image by downloading from a URL. "
+        "image_url must resolve to an allowed image content-type. "
+        "If recipe_json is omitted, server fetches recipe and reuses current values for update. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def add_or_update_recipe_image_from_url(
+    recipe_id: int,
+    image_url: str,
+    recipe_json: dict[str, Any] | None = None,
+    token: str | None = None,
+    image_filename: str = "recipe-from-url",
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
+    image_bytes, image_content_type = await _download_image_bytes(image_url)
+    return await client.add_or_update_recipe_image_bytes(
+        auth_token,
+        recipe_id=recipe_id,
+        recipe=payload,
+        image_bytes=image_bytes,
+        image_filename=image_filename,
+        image_content_type=image_content_type,
+    )
+
+
+@mcp.tool(
+    description=(
+        "Add or replace recipe image from raw SVG text. "
+        "SVG is rendered to PNG before upload. "
+        "If recipe_json is omitted, server fetches recipe and reuses current values for update. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def add_or_update_recipe_image_from_svg(
+    recipe_id: int,
+    svg_text: str,
+    recipe_json: dict[str, Any] | None = None,
+    token: str | None = None,
+    output_width: int | None = 680,
+    output_height: int | None = 680,
+    image_filename: str = "recipe-from-svg.png",
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
+
+    if not svg_text.strip():
+        raise CocktailPiApiError("svg_text must not be empty")
+
+    try:
+        png_bytes = cairosvg.svg2png(
+            bytestring=svg_text.encode("utf-8"),
+            output_width=output_width,
+            output_height=output_height,
+        )
+    except Exception as exc:
+        raise CocktailPiApiError(f"Failed to render svg_text: {exc}") from exc
+
+    return await client.add_or_update_recipe_image_bytes(
+        auth_token,
+        recipe_id=recipe_id,
+        recipe=payload,
+        image_bytes=png_bytes,
+        image_filename=image_filename,
+        image_content_type="image/png",
     )
 
 

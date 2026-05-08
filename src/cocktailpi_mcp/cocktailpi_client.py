@@ -86,15 +86,24 @@ class CocktailPiClient:
         recipe: dict[str, Any],
         *,
         image_base64: str | None = None,
+        image_bytes: bytes | None = None,
         image_filename: str = "recipe.jpg",
         image_content_type: str = "image/jpeg",
     ) -> dict[str, Any]:
         multipart_form = {
             "recipe": (None, json.dumps(recipe), "application/json")
         }
+        if image_base64 and image_bytes is not None:
+            raise CocktailPiApiError("Provide either image_base64 or image_bytes, not both")
         if image_base64:
             multipart_form["image"] = self._build_image_part(
                 image_base64=image_base64,
+                image_filename=image_filename,
+                image_content_type=image_content_type,
+            )
+        elif image_bytes is not None:
+            multipart_form["image"] = self._build_image_part_from_bytes(
+                image_bytes=image_bytes,
                 image_filename=image_filename,
                 image_content_type=image_content_type,
             )
@@ -113,15 +122,24 @@ class CocktailPiClient:
         remove_image: bool = False,
         *,
         image_base64: str | None = None,
+        image_bytes: bytes | None = None,
         image_filename: str = "recipe.jpg",
         image_content_type: str = "image/jpeg",
     ) -> dict[str, Any]:
         multipart_form = {
             "recipe": (None, json.dumps(recipe), "application/json")
         }
+        if image_base64 and image_bytes is not None:
+            raise CocktailPiApiError("Provide either image_base64 or image_bytes, not both")
         if image_base64:
             multipart_form["image"] = self._build_image_part(
                 image_base64=image_base64,
+                image_filename=image_filename,
+                image_content_type=image_content_type,
+            )
+        elif image_bytes is not None:
+            multipart_form["image"] = self._build_image_part_from_bytes(
+                image_bytes=image_bytes,
                 image_filename=image_filename,
                 image_content_type=image_content_type,
             )
@@ -165,6 +183,26 @@ class CocktailPiClient:
             recipe_id=recipe_id,
             recipe=recipe,
             remove_image=True,
+        )
+
+    async def add_or_update_recipe_image_bytes(
+        self,
+        token: str,
+        *,
+        recipe_id: int,
+        recipe: dict[str, Any],
+        image_bytes: bytes,
+        image_filename: str,
+        image_content_type: str,
+    ) -> dict[str, Any]:
+        return await self.update_recipe(
+            token,
+            recipe_id=recipe_id,
+            recipe=recipe,
+            remove_image=False,
+            image_bytes=image_bytes,
+            image_filename=image_filename,
+            image_content_type=image_content_type,
         )
 
     async def delete_recipe(self, token: str, recipe_id: int) -> dict[str, Any]:
@@ -270,6 +308,17 @@ class CocktailPiClient:
             raise CocktailPiApiError("image_base64 decoded to empty payload")
 
         return (image_filename, decoded, image_content_type)
+
+    def _build_image_part_from_bytes(
+        self,
+        *,
+        image_bytes: bytes,
+        image_filename: str,
+        image_content_type: str,
+    ) -> tuple[str, bytes, str]:
+        if not image_bytes:
+            raise CocktailPiApiError("image payload is empty")
+        return (image_filename, image_bytes, image_content_type)
 
 
 def _extract_error_detail(response: httpx.Response) -> str:

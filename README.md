@@ -115,6 +115,8 @@ Core operations:
 - `create_recipe`: create a new recipe
 - `update_recipe`: update an existing recipe
 - `add_or_update_recipe_image`: add or replace a recipe image
+- `add_or_update_recipe_image_from_url`: add/replace recipe image by URL
+- `add_or_update_recipe_image_from_svg`: add/replace recipe image from SVG text
 - `delete_recipe_image`: remove a recipe image
 - `delete_recipe`: delete a recipe
 - `list_pumps`: list pumps and configured ingredients
@@ -129,7 +131,10 @@ Helper operations:
 Image notes:
 - `create_recipe` and `update_recipe` now accept optional `image_base64` (plus optional `image_filename` and `image_content_type`).
 - `image_base64` can be raw base64 bytes or a data URL (for example `data:image/png;base64,...`).
-- CocktailPi image updates use the recipe update endpoint, so image-only tools still require a valid `recipe_json` payload.
+- `add_or_update_recipe_image_from_url` downloads image content server-side, so AI only sends a short URL argument.
+- `add_or_update_recipe_image_from_svg` renders SVG text to PNG server-side, avoiding large base64 arguments.
+- For `add_or_update_recipe_image`, `add_or_update_recipe_image_from_url`, and `delete_recipe_image`, `recipe_json` is optional.
+- If `recipe_json` is omitted, the MCP server fetches the existing recipe and reuses current values for update.
 
 Auth behavior notes:
 - Every tool's `token` parameter is optional.

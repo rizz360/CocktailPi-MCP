@@ -14,6 +14,8 @@ Core operations:
 - `create_recipe`: create a new recipe
 - `update_recipe`: update an existing recipe
 - `add_or_update_recipe_image`: add or replace a recipe image
+- `add_or_update_recipe_image_from_url`: add/replace recipe image by URL
+- `add_or_update_recipe_image_from_svg`: add/replace recipe image from SVG text
 - `delete_recipe_image`: remove a recipe image
 - `delete_recipe`: delete a recipe
 - `list_pumps`: list pumps and configured ingredients
@@ -83,6 +85,11 @@ For image add/update/remove, CocktailPi currently uses recipe create/update mult
   - `image_content_type`: defaults to `image/jpeg`
 - `update_recipe` accepts the same image fields plus `remove_image=true`.
 - `add_or_update_recipe_image` wraps update behavior for explicit image updates.
+- `add_or_update_recipe_image_from_url` fetches image server-side from URL and uploads bytes.
+- `add_or_update_recipe_image_from_svg` renders SVG text to PNG server-side and uploads bytes.
 - `delete_recipe_image` wraps update behavior with `remove_image=true`.
 
-Note: image tools require `recipe_json` because CocktailPi validates image changes through the full recipe update DTO.
+Image tool payload behavior:
+- `recipe_json` is optional for `add_or_update_recipe_image`, `add_or_update_recipe_image_from_url`, and `delete_recipe_image`.
+- When omitted, MCP fetches the current recipe and reuses it as update payload.
+- If auto-derived payload cannot determine required fields like `ownerId`, pass `recipe_json` explicitly.
