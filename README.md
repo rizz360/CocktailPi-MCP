@@ -114,6 +114,7 @@ Core operations:
 - `list_recipes`: list recipes/cocktails
 - `create_recipe`: create a new recipe
 - `update_recipe`: update an existing recipe
+- `analyze_pump_ingredient_optimization`: strict full-automation and replacement analysis across all recipes
 - `add_or_update_recipe_image`: add or replace a recipe image
 - `add_or_update_recipe_image_from_url`: add/replace recipe image by URL
 - `add_or_update_recipe_image_from_svg`: add/replace recipe image from SVG text

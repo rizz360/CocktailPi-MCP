@@ -314,6 +314,427 @@ async def _download_image_bytes(image_url: str) -> tuple[bytes, str]:
     return raw, content_type
 
 
+def _extract_step_ingredients(recipe: dict[str, Any]) -> list[dict[str, Any]]:
+    production_steps = recipe.get("productionSteps")
+    if not isinstance(production_steps, list):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for step in production_steps:
+        if not isinstance(step, dict):
+            continue
+        step_ingredients = step.get("stepIngredients")
+        if not isinstance(step_ingredients, list):
+            continue
+        for ingredient in step_ingredients:
+            if isinstance(ingredient, dict):
+                result.append(ingredient)
+    return result
+
+
+def _ingredient_type_label(step_ingredient: dict[str, Any]) -> str:
+    candidates = [
+        step_ingredient.get("ingredientType"),
+        step_ingredient.get("type"),
+    ]
+
+    nested_ingredient = step_ingredient.get("ingredient")
+    if isinstance(nested_ingredient, dict):
+        candidates.append(nested_ingredient.get("ingredientType"))
+        candidates.append(nested_ingredient.get("type"))
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    return ""
+
+
+def _is_manual_ingredient(step_ingredient: dict[str, Any]) -> bool:
+    label = _ingredient_type_label(step_ingredient)
+    if not label:
+        return False
+    return "manual" in label
+
+
+def _extract_ingredient_id(step_ingredient: dict[str, Any]) -> int | None:
+    ingredient_id = _as_positive_int(step_ingredient.get("ingredientId"))
+    if ingredient_id is not None:
+        return ingredient_id
+
+    ingredient_id = _as_positive_int(step_ingredient.get("id"))
+    if ingredient_id is not None:
+        return ingredient_id
+
+    nested_ingredient = step_ingredient.get("ingredient")
+    if isinstance(nested_ingredient, dict):
+        ingredient_id = _as_positive_int(nested_ingredient.get("id"))
+        if ingredient_id is not None:
+            return ingredient_id
+
+    return None
+
+
+def _extract_ingredient_name(step_ingredient: dict[str, Any], fallback_id: int | None) -> str:
+    candidates: list[Any] = [
+        step_ingredient.get("ingredientName"),
+        step_ingredient.get("name"),
+    ]
+
+    nested_ingredient = step_ingredient.get("ingredient")
+    if isinstance(nested_ingredient, dict):
+        candidates.append(nested_ingredient.get("name"))
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    if fallback_id is not None:
+        return f"Ingredient #{fallback_id}"
+    return "Unknown ingredient"
+
+
+def _extract_group_chain_from_group_obj(
+    group_obj: dict[str, Any],
+    group_parent_map: dict[int, int],
+) -> set[int]:
+    chain: set[int] = set()
+
+    current: dict[str, Any] | None = group_obj
+    seen_ids: set[int] = set()
+    while isinstance(current, dict):
+        current_id = _as_positive_int(current.get("id"))
+        if current_id is None:
+            current_id = _as_positive_int(current.get("groupId"))
+        if current_id is None:
+            break
+        if current_id in seen_ids:
+            break
+
+        seen_ids.add(current_id)
+        chain.add(current_id)
+
+        parent_id = _as_positive_int(current.get("parentGroupId"))
+        parent_group = current.get("parentGroup")
+        if parent_id is None and isinstance(parent_group, dict):
+            parent_id = _as_positive_int(parent_group.get("id"))
+
+        if parent_id is not None:
+            group_parent_map.setdefault(current_id, parent_id)
+
+        if isinstance(parent_group, dict):
+            current = parent_group
+            continue
+
+        break
+
+    return chain
+
+
+def _collect_ingredient_group_ids(
+    ingredient: dict[str, Any],
+    group_parent_map: dict[int, int],
+) -> set[int]:
+    group_ids: set[int] = set()
+
+    direct_group_id = _as_positive_int(ingredient.get("groupId"))
+    ingredient_group_id = _as_positive_int(ingredient.get("ingredientGroupId"))
+    parent_group_id = _as_positive_int(ingredient.get("parentGroupId"))
+
+    if direct_group_id is not None:
+        group_ids.add(direct_group_id)
+    if ingredient_group_id is not None:
+        group_ids.add(ingredient_group_id)
+    if parent_group_id is not None:
+        group_ids.add(parent_group_id)
+
+    if direct_group_id is not None and parent_group_id is not None:
+        group_parent_map.setdefault(direct_group_id, parent_group_id)
+
+    for key in ("group", "ingredientGroup", "parentGroup"):
+        group_obj = ingredient.get(key)
+        if isinstance(group_obj, dict):
+            group_ids.update(_extract_group_chain_from_group_obj(group_obj, group_parent_map))
+
+    return group_ids
+
+
+def _expand_group_ids(group_ids: set[int], group_parent_map: dict[int, int]) -> set[int]:
+    expanded = set(group_ids)
+    for group_id in list(group_ids):
+        current = group_id
+        visited: set[int] = set()
+        while True:
+            if current in visited:
+                break
+            visited.add(current)
+
+            parent = group_parent_map.get(current)
+            if parent is None:
+                break
+
+            expanded.add(parent)
+            current = parent
+    return expanded
+
+
+def _build_ingredient_indexes(
+    ingredients: list[dict[str, Any]],
+) -> tuple[dict[int, dict[str, Any]], dict[int, set[int]], dict[int, int]]:
+    by_id: dict[int, dict[str, Any]] = {}
+    group_parent_map: dict[int, int] = {}
+    ingredient_group_ids: dict[int, set[int]] = {}
+
+    for ingredient in ingredients:
+        ingredient_id = _as_positive_int(ingredient.get("id"))
+        group_ids = _collect_ingredient_group_ids(ingredient, group_parent_map)
+
+        if ingredient_id is not None:
+            by_id[ingredient_id] = ingredient
+            ingredient_group_ids[ingredient_id] = group_ids
+
+    for ingredient_id, group_ids in list(ingredient_group_ids.items()):
+        ingredient_group_ids[ingredient_id] = _expand_group_ids(group_ids, group_parent_map)
+
+    return by_id, ingredient_group_ids, group_parent_map
+
+
+def _extract_step_ingredient_group_ids(
+    step_ingredient: dict[str, Any],
+    ingredient_group_ids: dict[int, set[int]],
+    group_parent_map: dict[int, int],
+    ingredient_id: int | None,
+) -> set[int]:
+    group_ids: set[int] = set()
+
+    for key in ("groupId", "ingredientGroupId", "parentGroupId"):
+        group_id = _as_positive_int(step_ingredient.get(key))
+        if group_id is not None:
+            group_ids.add(group_id)
+
+    nested_ingredient = step_ingredient.get("ingredient")
+    if isinstance(nested_ingredient, dict):
+        for key in ("groupId", "ingredientGroupId", "parentGroupId"):
+            group_id = _as_positive_int(nested_ingredient.get(key))
+            if group_id is not None:
+                group_ids.add(group_id)
+
+        for key in ("group", "ingredientGroup", "parentGroup"):
+            group_obj = nested_ingredient.get(key)
+            if isinstance(group_obj, dict):
+                group_ids.update(_extract_group_chain_from_group_obj(group_obj, group_parent_map))
+
+    if ingredient_id is not None and ingredient_id in ingredient_group_ids:
+        group_ids.update(ingredient_group_ids[ingredient_id])
+
+    return _expand_group_ids(group_ids, group_parent_map)
+
+
+def _describe_requirement(requirement: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ingredientId": requirement.get("ingredientId"),
+        "ingredientName": requirement.get("ingredientName"),
+        "ingredientType": requirement.get("ingredientType"),
+        "groupIds": sorted(requirement.get("groupIds") or []),
+    }
+
+
+def _build_recipe_requirements(
+    recipe: dict[str, Any],
+    ingredient_group_ids: dict[int, set[int]],
+    group_parent_map: dict[int, int],
+) -> list[dict[str, Any]]:
+    requirements: list[dict[str, Any]] = []
+    for step_ingredient in _extract_step_ingredients(recipe):
+        if _is_manual_ingredient(step_ingredient):
+            continue
+
+        ingredient_id = _extract_ingredient_id(step_ingredient)
+        ingredient_type = _ingredient_type_label(step_ingredient)
+        ingredient_name = _extract_ingredient_name(step_ingredient, ingredient_id)
+        group_ids = _extract_step_ingredient_group_ids(
+            step_ingredient,
+            ingredient_group_ids=ingredient_group_ids,
+            group_parent_map=group_parent_map,
+            ingredient_id=ingredient_id,
+        )
+
+        requirements.append(
+            {
+                "ingredientId": ingredient_id,
+                "ingredientName": ingredient_name,
+                "ingredientType": ingredient_type,
+                "groupIds": group_ids,
+            }
+        )
+    return requirements
+
+
+def _build_pump_entries(
+    pumps: list[dict[str, Any]],
+    ingredient_group_ids: dict[int, set[int]],
+    ingredient_by_id: dict[int, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for pump in pumps:
+        current = pump.get("currentIngredient")
+        if not isinstance(current, dict):
+            continue
+
+        ingredient_id = _as_positive_int(current.get("id"))
+        if ingredient_id is None:
+            continue
+
+        ingredient_name = current.get("name")
+        if not isinstance(ingredient_name, str) or not ingredient_name.strip():
+            known = ingredient_by_id.get(ingredient_id)
+            candidate_name = known.get("name") if isinstance(known, dict) else None
+            if isinstance(candidate_name, str) and candidate_name.strip():
+                ingredient_name = candidate_name
+            else:
+                ingredient_name = f"Ingredient #{ingredient_id}"
+
+        entries.append(
+            {
+                "pumpId": pump.get("id"),
+                "pumpName": pump.get("name"),
+                "ingredientId": ingredient_id,
+                "ingredientName": ingredient_name,
+                "coveredIngredientIds": {ingredient_id},
+                "coveredGroupIds": set(ingredient_group_ids.get(ingredient_id, set())),
+            }
+        )
+
+    return entries
+
+
+def _evaluate_recipes_against_pumps(
+    recipes: list[dict[str, Any]],
+    requirements_by_recipe_id: dict[int, list[dict[str, Any]]],
+    pump_entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    fully_automatable: set[int] = set()
+    missing_by_recipe_id: dict[int, list[dict[str, Any]]] = {}
+    recipe_to_pump_usage: dict[int, set[int]] = {}
+
+    for recipe in recipes:
+        recipe_id = _as_positive_int(recipe.get("id"))
+        if recipe_id is None:
+            continue
+
+        requirements = requirements_by_recipe_id.get(recipe_id, [])
+        missing: list[dict[str, Any]] = []
+        used_pump_ids: set[int] = set()
+
+        for requirement in requirements:
+            requirement_ingredient_id = requirement.get("ingredientId")
+            requirement_group_ids = requirement.get("groupIds") or set()
+
+            matching_pumps: list[dict[str, Any]] = []
+            for pump in pump_entries:
+                covered_ingredient_ids = pump.get("coveredIngredientIds") or set()
+                covered_group_ids = pump.get("coveredGroupIds") or set()
+
+                ingredient_match = (
+                    isinstance(requirement_ingredient_id, int)
+                    and requirement_ingredient_id in covered_ingredient_ids
+                )
+                group_match = bool(set(requirement_group_ids) & set(covered_group_ids))
+
+                if ingredient_match or group_match:
+                    matching_pumps.append(pump)
+
+            if not matching_pumps:
+                missing.append(_describe_requirement(requirement))
+                continue
+
+            for pump in matching_pumps:
+                pump_id = _as_positive_int(pump.get("pumpId"))
+                if pump_id is not None:
+                    used_pump_ids.add(pump_id)
+
+        if missing:
+            missing_by_recipe_id[recipe_id] = missing
+            continue
+
+        fully_automatable.add(recipe_id)
+        recipe_to_pump_usage[recipe_id] = used_pump_ids
+
+    return {
+        "fullyAutomatableRecipeIds": fully_automatable,
+        "missingByRecipeId": missing_by_recipe_id,
+        "recipeToPumpUsage": recipe_to_pump_usage,
+    }
+
+
+async def _fetch_all_recipe_details(
+    auth_token: str,
+    *,
+    owner_id: int | None,
+    in_collection: int | None,
+    in_category: int | None,
+    search_name: str | None,
+    fabricable: str,
+    order_by: str,
+) -> tuple[list[dict[str, Any]], int, int]:
+    first_page = await client.list_recipes(
+        auth_token,
+        page=0,
+        owner_id=owner_id,
+        in_collection=in_collection,
+        in_category=in_category,
+        search_name=search_name,
+        fabricable=fabricable,
+        order_by=order_by,
+    )
+
+    total_pages = first_page.get("totalPages")
+    total_elements = first_page.get("totalElements")
+
+    if not isinstance(total_pages, int) or total_pages < 1:
+        total_pages = 1
+    if not isinstance(total_elements, int) or total_elements < 0:
+        total_elements = 0
+
+    content0 = first_page.get("content")
+    recipe_ids: list[int] = []
+    if isinstance(content0, list):
+        for recipe in content0:
+            if isinstance(recipe, dict):
+                recipe_id = _as_positive_int(recipe.get("id"))
+                if recipe_id is not None:
+                    recipe_ids.append(recipe_id)
+
+    for page in range(1, total_pages):
+        page_payload = await client.list_recipes(
+            auth_token,
+            page=page,
+            owner_id=owner_id,
+            in_collection=in_collection,
+            in_category=in_category,
+            search_name=search_name,
+            fabricable=fabricable,
+            order_by=order_by,
+        )
+        content = page_payload.get("content")
+        if not isinstance(content, list):
+            continue
+
+        for recipe in content:
+            if isinstance(recipe, dict):
+                recipe_id = _as_positive_int(recipe.get("id"))
+                if recipe_id is not None:
+                    recipe_ids.append(recipe_id)
+
+    unique_recipe_ids = sorted(set(recipe_ids))
+    details_tasks = [
+        client.get_recipe(auth_token, recipe_id, is_ingredient=False)
+        for recipe_id in unique_recipe_ids
+    ]
+    details = await asyncio.gather(*details_tasks)
+
+    return details, total_pages, total_elements
+
+
 @mcp.tool(
     description=(
         "Authenticate against CocktailPi and return JWT token details. "
@@ -663,6 +1084,263 @@ async def list_categories(token: str | None = None) -> list[dict[str, Any]]:
 async def list_glasses(token: str | None = None) -> list[dict[str, Any]]:
     auth_token = _resolve_token(token)
     return await client.list_glasses(auth_token)
+
+
+@mcp.tool(
+    description=(
+        "Analyze pump ingredient optimization across all recipes. "
+        "A recipe is fully automatable only when every non-manual step ingredient is "
+        "covered by configured pumps via direct ingredient id match or ingredient group/ancestor match. "
+        "Also simulates one-pump replacement options and returns the best replacement ingredient "
+        "(not currently on a pump) that unlocks the most new fully automatable recipes. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def analyze_pump_ingredient_optimization(
+    token: str | None = None,
+    owner_id: int | None = None,
+    in_collection: int | None = None,
+    in_category: int | None = None,
+    search_name: str | None = None,
+    fabricable: str = "all",
+    order_by: str = "name",
+    expected_total_pages: int | None = None,
+    expected_total_recipes: int | None = None,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+
+    pumps_task = client.list_pumps(auth_token)
+    ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=True)
+    recipes_task = _fetch_all_recipe_details(
+        auth_token,
+        owner_id=owner_id,
+        in_collection=in_collection,
+        in_category=in_category,
+        search_name=search_name,
+        fabricable=fabricable,
+        order_by=order_by,
+    )
+
+    pumps, ingredients, recipe_details_result = await asyncio.gather(
+        pumps_task,
+        ingredients_task,
+        recipes_task,
+    )
+    recipes, total_pages, total_elements = recipe_details_result
+
+    if expected_total_pages is not None and expected_total_pages != total_pages:
+        raise CocktailPiApiError(
+            f"Expected total pages={expected_total_pages}, but API returned total pages={total_pages}."
+        )
+
+    if expected_total_recipes is not None and expected_total_recipes != total_elements:
+        raise CocktailPiApiError(
+            "Expected total recipes="
+            f"{expected_total_recipes}, but API returned total recipes={total_elements}."
+        )
+
+    ingredient_by_id, ingredient_group_ids, group_parent_map = _build_ingredient_indexes(ingredients)
+    pump_entries = _build_pump_entries(pumps, ingredient_group_ids, ingredient_by_id)
+
+    recipes_by_id: dict[int, dict[str, Any]] = {}
+    requirements_by_recipe_id: dict[int, list[dict[str, Any]]] = {}
+    for recipe in recipes:
+        recipe_id = _as_positive_int(recipe.get("id"))
+        if recipe_id is None:
+            continue
+
+        recipes_by_id[recipe_id] = recipe
+        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(
+            recipe,
+            ingredient_group_ids=ingredient_group_ids,
+            group_parent_map=group_parent_map,
+        )
+
+    filtered_recipes = [recipes_by_id[recipe_id] for recipe_id in sorted(recipes_by_id)]
+    current_eval = _evaluate_recipes_against_pumps(
+        filtered_recipes,
+        requirements_by_recipe_id=requirements_by_recipe_id,
+        pump_entries=pump_entries,
+    )
+
+    fully_automatable_recipe_ids = set(current_eval["fullyAutomatableRecipeIds"])
+    missing_by_recipe_id = current_eval["missingByRecipeId"]
+    recipe_to_pump_usage = current_eval["recipeToPumpUsage"]
+
+    pump_usage_rows: list[dict[str, Any]] = []
+    for pump in pump_entries:
+        pump_id = _as_positive_int(pump.get("pumpId"))
+        if pump_id is None:
+            continue
+
+        matching_recipe_ids = sorted(
+            recipe_id
+            for recipe_id in fully_automatable_recipe_ids
+            if pump_id in recipe_to_pump_usage.get(recipe_id, set())
+        )
+
+        pump_usage_rows.append(
+            {
+                "pumpId": pump_id,
+                "pumpName": pump.get("pumpName"),
+                "ingredientId": pump.get("ingredientId"),
+                "ingredientName": pump.get("ingredientName"),
+                "fullyAutomatableRecipeCount": len(matching_recipe_ids),
+                "recipeIds": matching_recipe_ids,
+            }
+        )
+
+    pump_usage_rows.sort(
+        key=lambda row: (
+            int(row.get("fullyAutomatableRecipeCount") or 0),
+            str(row.get("pumpName") or ""),
+        )
+    )
+
+    least_used = pump_usage_rows[0] if pump_usage_rows else None
+
+    current_pump_ingredient_ids = {
+        _as_positive_int(pump.get("ingredientId"))
+        for pump in pump_entries
+        if _as_positive_int(pump.get("ingredientId")) is not None
+    }
+
+    candidate_ingredients: list[dict[str, Any]] = []
+    for ingredient in ingredients:
+        ingredient_id = _as_positive_int(ingredient.get("id"))
+        if ingredient_id is None:
+            continue
+        if ingredient_id in current_pump_ingredient_ids:
+            continue
+        candidate_ingredients.append(ingredient)
+
+    baseline_ids = set(fully_automatable_recipe_ids)
+    best_replacement: dict[str, Any] | None = None
+    best_new_unlock_count = -1
+
+    for pump_index, existing_pump in enumerate(pump_entries):
+        simulated_base = [dict(pump) for pump in pump_entries]
+
+        for candidate in candidate_ingredients:
+            candidate_id = _as_positive_int(candidate.get("id"))
+            if candidate_id is None:
+                continue
+
+            candidate_name = candidate.get("name")
+            if not isinstance(candidate_name, str) or not candidate_name.strip():
+                candidate_name = f"Ingredient #{candidate_id}"
+
+            simulated_pumps = [dict(pump) for pump in simulated_base]
+            simulated_pumps[pump_index] = {
+                "pumpId": existing_pump.get("pumpId"),
+                "pumpName": existing_pump.get("pumpName"),
+                "ingredientId": candidate_id,
+                "ingredientName": candidate_name,
+                "coveredIngredientIds": {candidate_id},
+                "coveredGroupIds": set(ingredient_group_ids.get(candidate_id, set())),
+            }
+
+            simulated_eval = _evaluate_recipes_against_pumps(
+                filtered_recipes,
+                requirements_by_recipe_id=requirements_by_recipe_id,
+                pump_entries=simulated_pumps,
+            )
+            simulated_full_ids = set(simulated_eval["fullyAutomatableRecipeIds"])
+            newly_unlocked_ids = sorted(simulated_full_ids - baseline_ids)
+
+            new_unlock_count = len(newly_unlocked_ids)
+            if new_unlock_count < best_new_unlock_count:
+                continue
+
+            newly_unlocked_rows: list[dict[str, Any]] = []
+            for recipe_id in newly_unlocked_ids:
+                recipe_obj = recipes_by_id.get(recipe_id, {})
+                newly_unlocked_rows.append(
+                    {
+                        "id": recipe_id,
+                        "name": recipe_obj.get("name"),
+                        "missingBefore": missing_by_recipe_id.get(recipe_id, []),
+                        "missingAfter": simulated_eval["missingByRecipeId"].get(recipe_id, []),
+                    }
+                )
+
+            still_blocked_rows: list[dict[str, Any]] = []
+            affected_recipe_ids = sorted(
+                recipe_id
+                for recipe_id in missing_by_recipe_id
+                if recipe_id not in newly_unlocked_ids
+            )
+            for recipe_id in affected_recipe_ids:
+                remaining = simulated_eval["missingByRecipeId"].get(recipe_id)
+                if not remaining:
+                    continue
+
+                before_missing = missing_by_recipe_id.get(recipe_id, [])
+                if len(remaining) >= len(before_missing):
+                    continue
+
+                recipe_obj = recipes_by_id.get(recipe_id, {})
+                still_blocked_rows.append(
+                    {
+                        "id": recipe_id,
+                        "name": recipe_obj.get("name"),
+                        "missingBefore": before_missing,
+                        "missingAfter": remaining,
+                    }
+                )
+
+            replacement_result = {
+                "replacePump": {
+                    "pumpId": existing_pump.get("pumpId"),
+                    "pumpName": existing_pump.get("pumpName"),
+                    "ingredientId": existing_pump.get("ingredientId"),
+                    "ingredientName": existing_pump.get("ingredientName"),
+                },
+                "replacementIngredient": {
+                    "id": candidate_id,
+                    "name": candidate_name,
+                },
+                "newFullyAutomatableRecipeCount": new_unlock_count,
+                "newlyUnlockedRecipes": newly_unlocked_rows,
+                "affectedButStillBlocked": still_blocked_rows,
+            }
+
+            is_better = new_unlock_count > best_new_unlock_count
+            is_tie_with_better_name = (
+                new_unlock_count == best_new_unlock_count
+                and best_replacement is not None
+                and str(candidate_name).lower()
+                < str(best_replacement["replacementIngredient"]["name"]).lower()
+            )
+
+            if best_replacement is None or is_better or is_tie_with_better_name:
+                best_replacement = replacement_result
+                best_new_unlock_count = new_unlock_count
+
+    blocked_recipe_rows = [
+        {
+            "id": recipe_id,
+            "name": recipes_by_id.get(recipe_id, {}).get("name"),
+            "missingIngredients": missing_items,
+        }
+        for recipe_id, missing_items in sorted(missing_by_recipe_id.items())
+    ]
+
+    return {
+        "summary": {
+            "recipesFetched": len(filtered_recipes),
+            "totalPages": total_pages,
+            "totalRecipesFromApi": total_elements,
+            "configuredPumpCount": len(pump_entries),
+            "fullyAutomatableRecipeCount": len(fully_automatable_recipe_ids),
+            "blockedRecipeCount": len(missing_by_recipe_id),
+        },
+        "pumpUsage": pump_usage_rows,
+        "leastUsedPumpIngredient": least_used,
+        "bestReplacement": best_replacement,
+        "fullyAutomatableRecipeIds": sorted(fully_automatable_recipe_ids),
+        "blockedRecipes": blocked_recipe_rows,
+    }
 
 
 def run() -> None:
