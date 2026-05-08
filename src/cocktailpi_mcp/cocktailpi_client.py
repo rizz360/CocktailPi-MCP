@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass
 import json
 from typing import Any
@@ -78,10 +80,24 @@ class CocktailPiClient:
             params={"isIngredient": str(is_ingredient).lower()},
         )
 
-    async def create_recipe(self, token: str, recipe: dict[str, Any]) -> dict[str, Any]:
+    async def create_recipe(
+        self,
+        token: str,
+        recipe: dict[str, Any],
+        *,
+        image_base64: str | None = None,
+        image_filename: str = "recipe.jpg",
+        image_content_type: str = "image/jpeg",
+    ) -> dict[str, Any]:
         multipart_form = {
             "recipe": (None, json.dumps(recipe), "application/json")
         }
+        if image_base64:
+            multipart_form["image"] = self._build_image_part(
+                image_base64=image_base64,
+                image_filename=image_filename,
+                image_content_type=image_content_type,
+            )
         return await self._request(
             "POST",
             "/api/recipe/",
@@ -95,16 +111,60 @@ class CocktailPiClient:
         recipe_id: int,
         recipe: dict[str, Any],
         remove_image: bool = False,
+        *,
+        image_base64: str | None = None,
+        image_filename: str = "recipe.jpg",
+        image_content_type: str = "image/jpeg",
     ) -> dict[str, Any]:
         multipart_form = {
             "recipe": (None, json.dumps(recipe), "application/json")
         }
+        if image_base64:
+            multipart_form["image"] = self._build_image_part(
+                image_base64=image_base64,
+                image_filename=image_filename,
+                image_content_type=image_content_type,
+            )
         return await self._request(
             "PUT",
             f"/api/recipe/{recipe_id}",
             token=token,
             params={"removeImage": str(remove_image).lower()},
             files=multipart_form,
+        )
+
+    async def add_or_update_recipe_image(
+        self,
+        token: str,
+        *,
+        recipe_id: int,
+        recipe: dict[str, Any],
+        image_base64: str,
+        image_filename: str = "recipe.jpg",
+        image_content_type: str = "image/jpeg",
+    ) -> dict[str, Any]:
+        return await self.update_recipe(
+            token,
+            recipe_id=recipe_id,
+            recipe=recipe,
+            remove_image=False,
+            image_base64=image_base64,
+            image_filename=image_filename,
+            image_content_type=image_content_type,
+        )
+
+    async def delete_recipe_image(
+        self,
+        token: str,
+        *,
+        recipe_id: int,
+        recipe: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self.update_recipe(
+            token,
+            recipe_id=recipe_id,
+            recipe=recipe,
+            remove_image=True,
         )
 
     async def delete_recipe(self, token: str, recipe_id: int) -> dict[str, Any]:
@@ -189,6 +249,27 @@ class CocktailPiClient:
             return response.json()
         except ValueError as exc:
             raise CocktailPiApiError("CocktailPi returned non-JSON response") from exc
+
+    def _build_image_part(
+        self,
+        *,
+        image_base64: str,
+        image_filename: str,
+        image_content_type: str,
+    ) -> tuple[str, bytes, str]:
+        raw = image_base64.strip()
+        if "," in raw and raw.lower().startswith("data:"):
+            raw = raw.split(",", 1)[1]
+
+        try:
+            decoded = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise CocktailPiApiError("image_base64 must be valid base64 data") from exc
+
+        if not decoded:
+            raise CocktailPiApiError("image_base64 decoded to empty payload")
+
+        return (image_filename, decoded, image_content_type)
 
 
 def _extract_error_detail(response: httpx.Response) -> str:

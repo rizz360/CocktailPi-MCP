@@ -116,18 +116,32 @@ async def get_recipe(
 @mcp.tool(
     description=(
         "Create a new CocktailPi recipe. "
-        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+        "The recipe_json argument must match CocktailPi recipe create DTO structure. "
+        "Optional image_base64 can be provided to set the recipe image during creation."
     )
 )
-async def create_recipe(recipe_json: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+async def create_recipe(
+    recipe_json: dict[str, Any],
+    token: str | None = None,
+    image_base64: str | None = None,
+    image_filename: str = "recipe.jpg",
+    image_content_type: str = "image/jpeg",
+) -> dict[str, Any]:
     auth_token = _resolve_token(token)
-    return await client.create_recipe(auth_token, recipe_json)
+    return await client.create_recipe(
+        auth_token,
+        recipe_json,
+        image_base64=image_base64,
+        image_filename=image_filename,
+        image_content_type=image_content_type,
+    )
 
 
 @mcp.tool(
     description=(
         "Update an existing CocktailPi recipe by id. "
-        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+        "The recipe_json argument must match CocktailPi recipe create DTO structure. "
+        "Use image_base64 to add/replace image and remove_image=true to delete image."
     )
 )
 async def update_recipe(
@@ -135,6 +149,9 @@ async def update_recipe(
     recipe_json: dict[str, Any],
     token: str | None = None,
     remove_image: bool = False,
+    image_base64: str | None = None,
+    image_filename: str = "recipe.jpg",
+    image_content_type: str = "image/jpeg",
 ) -> dict[str, Any]:
     auth_token = _resolve_token(token)
     return await client.update_recipe(
@@ -142,6 +159,53 @@ async def update_recipe(
         recipe_id=recipe_id,
         recipe=recipe_json,
         remove_image=remove_image,
+        image_base64=image_base64,
+        image_filename=image_filename,
+        image_content_type=image_content_type,
+    )
+
+
+@mcp.tool(
+    description=(
+        "Add or replace the image of an existing CocktailPi recipe. "
+        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+    )
+)
+async def add_or_update_recipe_image(
+    recipe_id: int,
+    recipe_json: dict[str, Any],
+    image_base64: str,
+    token: str | None = None,
+    image_filename: str = "recipe.jpg",
+    image_content_type: str = "image/jpeg",
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    return await client.add_or_update_recipe_image(
+        auth_token,
+        recipe_id=recipe_id,
+        recipe=recipe_json,
+        image_base64=image_base64,
+        image_filename=image_filename,
+        image_content_type=image_content_type,
+    )
+
+
+@mcp.tool(
+    description=(
+        "Delete the image of an existing CocktailPi recipe. "
+        "The recipe_json argument must match CocktailPi recipe create DTO structure."
+    )
+)
+async def delete_recipe_image(
+    recipe_id: int,
+    recipe_json: dict[str, Any],
+    token: str | None = None,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+    return await client.delete_recipe_image(
+        auth_token,
+        recipe_id=recipe_id,
+        recipe=recipe_json,
     )
 
 

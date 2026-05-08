@@ -8,6 +8,8 @@ Core operations:
 - `list_recipes`: list recipes/cocktails
 - `create_recipe`: create a new recipe
 - `update_recipe`: update an existing recipe
+- `add_or_update_recipe_image`: add or replace a recipe image
+- `delete_recipe_image`: remove a recipe image
 - `delete_recipe`: delete a recipe
 - `list_pumps`: list pumps and configured ingredients
 
@@ -24,8 +26,8 @@ This MCP server calls these CocktailPi endpoints:
 - `POST /api/auth/login`
 - `GET /api/recipe/`
 - `GET /api/recipe/{id}`
-- `POST /api/recipe/` (multipart with `recipe` part)
-- `PUT /api/recipe/{id}` (multipart with `recipe` part)
+- `POST /api/recipe/` (multipart with `recipe` and optional `image` part)
+- `PUT /api/recipe/{id}` (multipart with `recipe` and optional `image` part, supports `removeImage=true`)
 - `DELETE /api/recipe/{id}`
 - `GET /api/pump/`
 - `GET /api/ingredient/`
@@ -60,3 +62,17 @@ This MCP server calls these CocktailPi endpoints:
 ```
 
 Use `list_ingredients`, `list_categories`, and `list_glasses` to discover valid ids.
+
+## Image operations
+
+For image add/update/remove, CocktailPi currently uses recipe create/update multipart endpoints.
+
+- `create_recipe` accepts optional:
+  - `image_base64`: base64 payload (raw base64 or data URL)
+  - `image_filename`: defaults to `recipe.jpg`
+  - `image_content_type`: defaults to `image/jpeg`
+- `update_recipe` accepts the same image fields plus `remove_image=true`.
+- `add_or_update_recipe_image` wraps update behavior for explicit image updates.
+- `delete_recipe_image` wraps update behavior with `remove_image=true`.
+
+Note: image tools require `recipe_json` because CocktailPi validates image changes through the full recipe update DTO.

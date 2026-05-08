@@ -121,6 +121,8 @@ Core operations:
 - `list_recipes`: list recipes/cocktails
 - `create_recipe`: create a new recipe
 - `update_recipe`: update an existing recipe
+- `add_or_update_recipe_image`: add or replace a recipe image
+- `delete_recipe_image`: remove a recipe image
 - `delete_recipe`: delete a recipe
 - `list_pumps`: list pumps and configured ingredients
 
@@ -130,6 +132,11 @@ Helper operations:
 - `list_ingredients`: list ingredient ids/names
 - `list_categories`: list category ids/names
 - `list_glasses`: list glass ids/names
+
+Image notes:
+- `create_recipe` and `update_recipe` now accept optional `image_base64` (plus optional `image_filename` and `image_content_type`).
+- `image_base64` can be raw base64 bytes or a data URL (for example `data:image/png;base64,...`).
+- CocktailPi image updates use the recipe update endpoint, so image-only tools still require a valid `recipe_json` payload.
 
 ## Troubleshooting
 
