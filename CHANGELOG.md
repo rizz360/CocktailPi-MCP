@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.3.0...v0.4.0) (2026-05-08)
+
+
+### Features
+
+* add recipe image MCP operations ([4bcd997](https://github.com/rizz360/CocktailPi-MCP/commit/4bcd99794d6db3e6d1a698896e7e2d5b2c0d2391))
+* enhance documentation with authentication and recipe guidelines ([4adc635](https://github.com/rizz360/CocktailPi-MCP/commit/4adc635d246fce8cad28e8c772be4e71305fb98b))
+
+
+### Documentation
+
+* remove SKILL.md and update README for streamlined documentation ([d2dfc82](https://github.com/rizz360/CocktailPi-MCP/commit/d2dfc82e049b1f03141bc6beeeb9019380dda9db))
+
 ## [0.3.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.2.0...v0.3.0) (2026-05-08)
 
 
