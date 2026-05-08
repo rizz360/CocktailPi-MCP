@@ -536,13 +536,21 @@ def _extract_step_ingredient_group_ids(
             if isinstance(group_obj, dict):
                 group_ids.update(_extract_group_chain_from_group_obj(group_obj, group_parent_map))
 
-    if ingredient_id is not None and ingredient_id in ingredient_group_ids:
+    is_group_requirement = "group" in ingredient_type
+
+    # For explicit group requirements, include full ancestor chain so a pump leaf
+    # can satisfy a broader requested group (e.g. Dry Gin pump covers Gin group).
+    if is_group_requirement and ingredient_id is not None and ingredient_id in ingredient_group_ids:
         group_ids.update(ingredient_group_ids[ingredient_id])
 
-    if "group" in ingredient_type and ingredient_id is not None:
+    if is_group_requirement and ingredient_id is not None:
         group_ids.add(ingredient_id)
+        return _expand_group_ids(group_ids, group_parent_map)
 
-    return _expand_group_ids(group_ids, group_parent_map)
+    # For automated leaf requirements, keep only direct group ids.
+    # This avoids treating sibling leaves as interchangeable via shared ancestors
+    # (e.g. Gold Rum should not auto-match a White Rum pump).
+    return group_ids
 
 
 def _describe_requirement(requirement: dict[str, Any]) -> dict[str, Any]:
