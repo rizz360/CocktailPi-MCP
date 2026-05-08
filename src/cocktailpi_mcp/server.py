@@ -512,44 +512,53 @@ def _extract_step_ingredient_group_ids(
     ingredient_type: str,
 ) -> set[int]:
     group_ids: set[int] = set()
+    is_group_requirement = "group" in ingredient_type
+
+    nested_ingredient = step_ingredient.get("ingredient")
+
+    if is_group_requirement:
+        # Group requirements must match the requested group itself.
+        # Do not include ancestors here; otherwise sibling groups become interchangeable.
+        for key in ("groupId", "ingredientGroupId"):
+            group_id = _as_positive_int(step_ingredient.get(key))
+            if group_id is not None:
+                group_ids.add(group_id)
+
+        if isinstance(nested_ingredient, dict):
+            nested_id = _as_positive_int(nested_ingredient.get("id"))
+            nested_type = nested_ingredient.get("type")
+            nested_type_label = nested_type.strip().lower() if isinstance(nested_type, str) else ""
+            if "group" in nested_type_label and nested_id is not None:
+                group_ids.add(nested_id)
+
+            for key in ("groupId", "ingredientGroupId"):
+                group_id = _as_positive_int(nested_ingredient.get(key))
+                if group_id is not None:
+                    group_ids.add(group_id)
+
+        if not group_ids and ingredient_id is not None:
+            group_ids.add(ingredient_id)
+
+        return group_ids
 
     for key in ("groupId", "ingredientGroupId", "parentGroupId"):
         group_id = _as_positive_int(step_ingredient.get(key))
         if group_id is not None:
             group_ids.add(group_id)
 
-    nested_ingredient = step_ingredient.get("ingredient")
     if isinstance(nested_ingredient, dict):
         for key in ("groupId", "ingredientGroupId", "parentGroupId"):
             group_id = _as_positive_int(nested_ingredient.get(key))
             if group_id is not None:
                 group_ids.add(group_id)
 
-        nested_type = nested_ingredient.get("type")
-        nested_type_label = nested_type.strip().lower() if isinstance(nested_type, str) else ""
-        nested_id = _as_positive_int(nested_ingredient.get("id"))
-        if "group" in nested_type_label and nested_id is not None:
-            group_ids.add(nested_id)
-
         for key in ("group", "ingredientGroup", "parentGroup"):
             group_obj = nested_ingredient.get(key)
             if isinstance(group_obj, dict):
                 group_ids.update(_extract_group_chain_from_group_obj(group_obj, group_parent_map))
 
-    is_group_requirement = "group" in ingredient_type
-
-    # For explicit group requirements, include full ancestor chain so a pump leaf
-    # can satisfy a broader requested group (e.g. Dry Gin pump covers Gin group).
-    if is_group_requirement and ingredient_id is not None and ingredient_id in ingredient_group_ids:
-        group_ids.update(ingredient_group_ids[ingredient_id])
-
-    if is_group_requirement and ingredient_id is not None:
-        group_ids.add(ingredient_id)
-        return _expand_group_ids(group_ids, group_parent_map)
-
     # For automated leaf requirements, keep only direct group ids.
-    # This avoids treating sibling leaves as interchangeable via shared ancestors
-    # (e.g. Gold Rum should not auto-match a White Rum pump).
+    # This avoids treating sibling leaves as interchangeable via shared ancestors.
     return group_ids
 
 
