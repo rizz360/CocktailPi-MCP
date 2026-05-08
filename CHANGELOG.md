@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.4.0...v0.5.0) (2026-05-08)
+
+
+### Features
+
+* add URL and SVG recipe image upload tools ([8243330](https://github.com/rizz360/CocktailPi-MCP/commit/8243330ca08439bdf93470761968e6cbae2468b0))
+
+
+### Documentation
+
+* update README for clarity on MCP server usage and configuration ([3de5470](https://github.com/rizz360/CocktailPi-MCP/commit/3de5470642cb1f4e5b043bfae3f5d2ad355abd35))
+
 ## [0.4.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.3.0...v0.4.0) (2026-05-08)
 
 
