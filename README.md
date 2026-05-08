@@ -91,6 +91,27 @@ docker run --rm -i \
   cocktailpi-mcp
 ```
 
+Docker Compose example:
+
+```yaml
+services:
+  cocktailpi-mcp:
+    build: .
+    image: cocktailpi-mcp
+    stdin_open: true
+    tty: true
+    environment:
+      COCKTAILPI_BASE_URL: http://host.docker.internal:8080
+      COCKTAILPI_ACCESS_TOKEN: YOUR_TOKEN
+      COCKTAILPI_TIMEOUT_SECONDS: 20
+```
+
+Start it with:
+
+```bash
+docker compose up --build
+```
+
 ## MCP client config example
 
 Example command-based MCP entry:
