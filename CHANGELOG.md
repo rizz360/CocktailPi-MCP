@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.7.0...v0.8.0) (2026-05-08)
+
+
+### Features
+
+* add analyze_current_pump_contributions tool to suggest ingredient replacements ([6fe2fff](https://github.com/rizz360/CocktailPi-MCP/commit/6fe2fffd4b00b286962fcd6002ee0b20fd7f8328))
+
 ## [0.7.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.6.0...v0.7.0) (2026-05-08)
 
 
