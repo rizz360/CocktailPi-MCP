@@ -6,89 +6,22 @@
 
 Model Context Protocol (MCP) server that exposes CocktailPi backend operations as MCP tools.
 
-Use this repository in one of two ways:
-- Run the published container image (recommended for most users).
-- Develop locally from source (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+This README focuses on getting it running fast for end users.
 
-## What this server does
+## Quick start
 
-- Uses Python, which is typically already available on hosts running CocktailPi.
-- Keeps dependencies low (official MCP SDK + HTTP client).
-- Proxies existing CocktailPi backend REST APIs, so no direct database coupling.
+### 1) Have CocktailPi running
 
-## Implemented tools
+Before connecting AI, make sure your CocktailPi backend is reachable from Docker.
 
-Required tools:
-- `list_recipes`: list defined cocktails/recipes, with optional full details.
-- `create_recipe`: add a new recipe.
-- `update_recipe`: update an existing recipe.
-- `delete_recipe`: delete a recipe.
-- `list_pumps`: list attached pumps including currently configured ingredient/drink.
+You need:
+- A working CocktailPi installation
+- A backend URL (for example `http://cocktailpi/`, `http://localhost:8080`, or your Tailscale/LAN URL)
+- Credentials or a JWT token
 
-Additional helper tools:
-- `login`: get JWT token from CocktailPi backend.
-- `get_recipe`: fetch one recipe by id.
-- `list_ingredients`: resolve ingredient ids for recipe authoring.
-- `list_categories`: resolve category ids.
-- `list_glasses`: resolve glass ids.
+### 2) Adjust Docker Compose settings
 
-## CocktailPi API mapping
-
-This MCP server calls these CocktailPi endpoints:
-- `POST /api/auth/login`
-- `GET /api/recipe/`
-- `GET /api/recipe/{id}`
-- `POST /api/recipe/` (multipart with `recipe` part)
-- `PUT /api/recipe/{id}` (multipart with `recipe` part)
-- `DELETE /api/recipe/{id}`
-- `GET /api/pump/`
-- `GET /api/ingredient/`
-- `GET /api/category/`
-- `GET /api/glass/`
-
-## Prerequisites
-
-- Docker and Docker Compose
-- Network access from this container to your CocktailPi backend
-- CocktailPi user with permissions:
-  - read recipes/pumps/ingredients (for list tools)
-  - `RECIPE_CREATOR` role for creating/updating recipes
-  - owner or `ADMIN` role for deleting recipes (as enforced by CocktailPi)
-
-## Quick start (Docker Compose)
-
-1. Copy or adapt [docker-compose.yml](docker-compose.yml).
-2. Set the environment values, especially `COCKTAILPI_BASE_URL`.
-3. Start the service:
-
-```bash
-docker compose up -d
-```
-
-4. Stop the service:
-
-```bash
-docker compose down
-```
-
-## Docker usage
-
-Pull published image:
-
-```bash
-docker pull ghcr.io/rizz360/cocktailpi-mcp:latest
-```
-
-Run with env vars:
-
-```bash
-docker run --rm -i \
-  -e COCKTAILPI_BASE_URL=http://host.docker.internal:8080 \
-  -e COCKTAILPI_ACCESS_TOKEN=YOUR_TOKEN \
-  ghcr.io/rizz360/cocktailpi-mcp:latest
-```
-
-Docker Compose example:
+Use [docker-compose.yml](docker-compose.yml) and edit the environment section:
 
 ```yaml
 services:
@@ -97,71 +30,106 @@ services:
     stdin_open: true
     tty: true
     environment:
-      COCKTAILPI_BASE_URL: http://host.docker.internal:8080
-      COCKTAILPI_ACCESS_TOKEN: YOUR_TOKEN
+      COCKTAILPI_BASE_URL: http://cocktailpi/
+
+      # Option A: username/password auto-login
+      COCKTAILPI_USERNAME: your-username
+      COCKTAILPI_PASSWORD: your-password
+
+      # Option B: static JWT token (use instead of username/password)
+      # COCKTAILPI_ACCESS_TOKEN: your-jwt-token
+
       COCKTAILPI_TIMEOUT_SECONDS: 20
 ```
 
-Start it with:
+Start/stop:
 
 ```bash
-docker compose up
+docker compose up -d
+docker compose down
 ```
 
-## Development
+### 3) Connect your AI client
 
-Contributor and local source setup instructions are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Most MCP clients accept an `mcpServers` command-based config.
 
-## MCP client config example
+#### Claude Desktop (macOS)
 
-Example command-based MCP entry:
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "cocktailpi": {
-      "command": "python",
-      "args": ["-m", "cocktailpi_mcp.main"],
-      "env": {
-        "PYTHONPATH": "src",
-        "COCKTAILPI_BASE_URL": "http://localhost:8080"
-      }
+      "command": "docker",
+      "args": ["compose", "run", "--rm", "-T", "cocktailpi-mcp"]
     }
   }
 }
 ```
 
-## Recipe payload shape for create_recipe
+#### Cursor
 
-`create_recipe` accepts `recipe_json` matching CocktailPi `RecipeDto.Request.Create`:
+Create or edit `.cursor/mcp.json` in your project:
 
 ```json
 {
-  "name": "Gin Tonic",
-  "ownerId": 1,
-  "description": "Classic long drink",
-  "categoryIds": [1],
-  "defaultGlassId": 1,
-  "productionSteps": [
-    {
-      "type": "addIngredients",
-      "stepIngredients": [
-        { "ingredientId": 10, "amount": 50, "scale": true, "boostable": false },
-        { "ingredientId": 11, "amount": 150, "scale": true, "boostable": false }
-      ]
-    },
-    {
-      "type": "writtenInstruction",
-      "message": "Add ice and garnish with lime"
+  "mcpServers": {
+    "cocktailpi": {
+      "command": "docker",
+      "args": ["compose", "run", "--rm", "-T", "cocktailpi-mcp"]
     }
-  ]
+  }
 }
 ```
 
-Use `list_ingredients`, `list_categories`, and `list_glasses` to discover valid ids.
+#### Other MCP clients
 
-## Notes
+If your client cannot run `docker compose`, use a direct image command:
 
-- The server runs over stdio transport (best for MCP command integrations).
-- If no token is provided in a tool call, the server falls back to `COCKTAILPI_ACCESS_TOKEN`.
-- `create_recipe` currently supports recipe JSON only (no image upload yet).
+```json
+{
+  "mcpServers": {
+    "cocktailpi": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
+        "-e", "COCKTAILPI_USERNAME=your-username",
+        "-e", "COCKTAILPI_PASSWORD=your-password",
+        "ghcr.io/rizz360/cocktailpi-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+### 4) What AI can do once connected
+
+Core operations:
+- `list_recipes`: list recipes/cocktails
+- `create_recipe`: create a new recipe
+- `update_recipe`: update an existing recipe
+- `delete_recipe`: delete a recipe
+- `list_pumps`: list pumps and configured ingredients
+
+Helper operations:
+- `login`: obtain token from CocktailPi backend
+- `get_recipe`: fetch one recipe by id
+- `list_ingredients`: list ingredient ids/names
+- `list_categories`: list category ids/names
+- `list_glasses`: list glass ids/names
+
+## Troubleshooting
+
+- Connection errors usually mean `COCKTAILPI_BASE_URL` is not reachable from Docker.
+- Auth errors usually mean wrong credentials/token or missing permissions.
+- If your AI client cannot run `docker compose`, use the direct `docker run` config shown above.
+
+## Advanced reference
+
+Detailed endpoint mapping and recipe payload examples are in [docs/REFERENCE.md](docs/REFERENCE.md).
+
+## Development
+
+Contributor and local source setup instructions are in [CONTRIBUTING.md](CONTRIBUTING.md).
