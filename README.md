@@ -6,7 +6,11 @@
 
 Model Context Protocol (MCP) server that exposes CocktailPi backend operations as MCP tools.
 
-## Why this implementation
+Use this repository in one of two ways:
+- Run the published container image (recommended for most users).
+- Develop locally from source (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## What this server does
 
 - Uses Python, which is typically already available on hosts running CocktailPi.
 - Keeps dependencies low (official MCP SDK + HTTP client).
@@ -44,38 +48,27 @@ This MCP server calls these CocktailPi endpoints:
 
 ## Prerequisites
 
-- Python 3.10+
-- Network access to CocktailPi backend (default `http://localhost:8080`)
+- Docker and Docker Compose
+- Network access from this container to your CocktailPi backend
 - CocktailPi user with permissions:
   - read recipes/pumps/ingredients (for list tools)
   - `RECIPE_CREATOR` role for creating/updating recipes
   - owner or `ADMIN` role for deleting recipes (as enforced by CocktailPi)
 
-## Local setup
+## Quick start (Docker Compose)
 
-1. Create virtual environment and install dependencies:
+1. Copy or adapt [docker-compose.yml](docker-compose.yml).
+2. Set the environment values, especially `COCKTAILPI_BASE_URL`.
+3. Start the service:
 
 ```bash
-python -m venv .venv
-. .venv/Scripts/activate
-pip install -r requirements.txt
+docker compose up -d
 ```
 
-2. Configure environment variables:
+4. Stop the service:
 
 ```bash
-copy .env.example .env
-```
-
-Set at least:
-- `COCKTAILPI_BASE_URL` (example: `http://localhost:8080`)
-- Optional: `COCKTAILPI_ACCESS_TOKEN`
-
-3. Run server:
-
-```bash
-set PYTHONPATH=src
-python -m cocktailpi_mcp.main
+docker compose down
 ```
 
 ## Docker usage
@@ -114,6 +107,10 @@ Start it with:
 ```bash
 docker compose up
 ```
+
+## Development
+
+Contributor and local source setup instructions are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## MCP client config example
 
