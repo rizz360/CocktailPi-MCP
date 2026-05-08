@@ -61,15 +61,27 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "cocktailpi": {
       "command": "docker",
-      "args": ["compose", "run", "--rm", "-T", "cocktailpi-mcp"]
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
+        "-e", "COCKTAILPI_USERNAME=your-username",
+        "-e", "COCKTAILPI_PASSWORD=your-password",
+        "ghcr.io/rizz360/cocktailpi-mcp:latest"
+      ]
     }
   }
 }
 ```
 
+Put your credentials in the `-e` values above, or replace username/password with:
+
+```json
+"-e", "COCKTAILPI_ACCESS_TOKEN=your-jwt-token"
+```
+
 #### Cursor
 
-Create or edit `.cursor/mcp.json` in your project:
+Create or edit `.cursor/mcp.json` in your project (works when Cursor is opened in this repository):
 
 ```json
 {
