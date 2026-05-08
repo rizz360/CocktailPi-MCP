@@ -503,6 +503,7 @@ def _extract_step_ingredient_group_ids(
     ingredient_group_ids: dict[int, set[int]],
     group_parent_map: dict[int, int],
     ingredient_id: int | None,
+    ingredient_type: str,
 ) -> set[int]:
     group_ids: set[int] = set()
 
@@ -518,6 +519,12 @@ def _extract_step_ingredient_group_ids(
             if group_id is not None:
                 group_ids.add(group_id)
 
+        nested_type = nested_ingredient.get("type")
+        nested_type_label = nested_type.strip().lower() if isinstance(nested_type, str) else ""
+        nested_id = _as_positive_int(nested_ingredient.get("id"))
+        if "group" in nested_type_label and nested_id is not None:
+            group_ids.add(nested_id)
+
         for key in ("group", "ingredientGroup", "parentGroup"):
             group_obj = nested_ingredient.get(key)
             if isinstance(group_obj, dict):
@@ -525,6 +532,9 @@ def _extract_step_ingredient_group_ids(
 
     if ingredient_id is not None and ingredient_id in ingredient_group_ids:
         group_ids.update(ingredient_group_ids[ingredient_id])
+
+    if "group" in ingredient_type and ingredient_id is not None:
+        group_ids.add(ingredient_id)
 
     return _expand_group_ids(group_ids, group_parent_map)
 
@@ -556,6 +566,7 @@ def _build_recipe_requirements(
             ingredient_group_ids=ingredient_group_ids,
             group_parent_map=group_parent_map,
             ingredient_id=ingredient_id,
+            ingredient_type=ingredient_type,
         )
 
         requirements.append(
@@ -607,6 +618,30 @@ def _build_pump_entries(
     return entries
 
 
+def _matching_pumps_for_requirement(
+    requirement: dict[str, Any],
+    pump_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    requirement_ingredient_id = requirement.get("ingredientId")
+    requirement_group_ids = requirement.get("groupIds") or set()
+
+    matches: list[dict[str, Any]] = []
+    for pump in pump_entries:
+        covered_ingredient_ids = pump.get("coveredIngredientIds") or set()
+        covered_group_ids = pump.get("coveredGroupIds") or set()
+
+        ingredient_match = (
+            isinstance(requirement_ingredient_id, int)
+            and requirement_ingredient_id in covered_ingredient_ids
+        )
+        group_match = bool(set(requirement_group_ids) & set(covered_group_ids))
+
+        if ingredient_match or group_match:
+            matches.append(pump)
+
+    return matches
+
+
 def _evaluate_recipes_against_pumps(
     recipes: list[dict[str, Any]],
     requirements_by_recipe_id: dict[int, list[dict[str, Any]]],
@@ -626,22 +661,7 @@ def _evaluate_recipes_against_pumps(
         used_pump_ids: set[int] = set()
 
         for requirement in requirements:
-            requirement_ingredient_id = requirement.get("ingredientId")
-            requirement_group_ids = requirement.get("groupIds") or set()
-
-            matching_pumps: list[dict[str, Any]] = []
-            for pump in pump_entries:
-                covered_ingredient_ids = pump.get("coveredIngredientIds") or set()
-                covered_group_ids = pump.get("coveredGroupIds") or set()
-
-                ingredient_match = (
-                    isinstance(requirement_ingredient_id, int)
-                    and requirement_ingredient_id in covered_ingredient_ids
-                )
-                group_match = bool(set(requirement_group_ids) & set(covered_group_ids))
-
-                if ingredient_match or group_match:
-                    matching_pumps.append(pump)
+            matching_pumps = _matching_pumps_for_requirement(requirement, pump_entries)
 
             if not matching_pumps:
                 missing.append(_describe_requirement(requirement))
@@ -1110,7 +1130,7 @@ async def analyze_pump_ingredient_optimization(
     auth_token = _resolve_token(token)
 
     pumps_task = client.list_pumps(auth_token)
-    ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=True)
+    ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=False)
     recipes_task = _fetch_all_recipe_details(
         auth_token,
         owner_id=owner_id,
@@ -1179,6 +1199,23 @@ async def analyze_pump_ingredient_optimization(
             if pump_id in recipe_to_pump_usage.get(recipe_id, set())
         )
 
+        recipes_using_pump_ids: list[int] = []
+        for recipe in filtered_recipes:
+            recipe_id = _as_positive_int(recipe.get("id"))
+            if recipe_id is None:
+                continue
+
+            requirements = requirements_by_recipe_id.get(recipe_id, [])
+            uses_pump = False
+            for requirement in requirements:
+                matching_pumps = _matching_pumps_for_requirement(requirement, pump_entries)
+                if any(_as_positive_int(p.get("pumpId")) == pump_id for p in matching_pumps):
+                    uses_pump = True
+                    break
+
+            if uses_pump:
+                recipes_using_pump_ids.append(recipe_id)
+
         pump_usage_rows.append(
             {
                 "pumpId": pump_id,
@@ -1187,6 +1224,8 @@ async def analyze_pump_ingredient_optimization(
                 "ingredientName": pump.get("ingredientName"),
                 "fullyAutomatableRecipeCount": len(matching_recipe_ids),
                 "recipeIds": matching_recipe_ids,
+                "recipesUsingPumpIngredientCount": len(recipes_using_pump_ids),
+                "recipesUsingPumpIngredientIds": sorted(recipes_using_pump_ids),
             }
         )
 
