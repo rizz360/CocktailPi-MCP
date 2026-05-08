@@ -1944,6 +1944,267 @@ async def suggest_optimal_pump_configuration(
     return result
 
 
+@mcp.tool(
+    description=(
+        "Analyze the current pump setup for fully automatable cocktails, rank pumps by least contribution, "
+        "and suggest stronger replacement ingredients from your bar. "
+        "Contribution is measured as how many currently fully automatable cocktails are lost if that pump is removed. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def analyze_current_pump_contributions(
+    token: str | None = None,
+    candidate_source: str = "in_bar",
+    least_pumps_to_explain: int = 3,
+    alternatives_per_pump: int = 5,
+    owner_id: int | None = None,
+    in_collection: int | None = None,
+    in_category: int | None = None,
+    search_name: str | None = None,
+    fabricable: str = "all",
+    order_by: str = "name",
+    expected_total_pages: int | None = None,
+    expected_total_recipes: int | None = None,
+    include_recipe_names: bool = True,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+
+    if least_pumps_to_explain < 1:
+        raise CocktailPiApiError("least_pumps_to_explain must be >= 1")
+    if alternatives_per_pump < 1:
+        raise CocktailPiApiError("alternatives_per_pump must be >= 1")
+
+    pumps_task = client.list_pumps(auth_token)
+    ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=False)
+    recipes_task = _fetch_all_recipe_details(
+        auth_token,
+        owner_id=owner_id,
+        in_collection=in_collection,
+        in_category=in_category,
+        search_name=search_name,
+        fabricable=fabricable,
+        order_by=order_by,
+    )
+
+    pumps, ingredients, recipe_details_result = await asyncio.gather(
+        pumps_task,
+        ingredients_task,
+        recipes_task,
+    )
+    recipes, total_pages, total_elements = recipe_details_result
+
+    if expected_total_pages is not None and expected_total_pages != total_pages:
+        raise CocktailPiApiError(
+            f"Expected total pages={expected_total_pages}, but API returned total pages={total_pages}."
+        )
+
+    if expected_total_recipes is not None and expected_total_recipes != total_elements:
+        raise CocktailPiApiError(
+            "Expected total recipes="
+            f"{expected_total_recipes}, but API returned total recipes={total_elements}."
+        )
+
+    ingredient_by_id, ingredient_group_ids, group_parent_map = _build_ingredient_indexes(ingredients)
+
+    recipes_by_id: dict[int, dict[str, Any]] = {}
+    requirements_by_recipe_id: dict[int, list[dict[str, Any]]] = {}
+    for recipe in recipes:
+        recipe_id = _as_positive_int(recipe.get("id"))
+        if recipe_id is None:
+            continue
+        recipes_by_id[recipe_id] = recipe
+        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(
+            recipe,
+            ingredient_group_ids=ingredient_group_ids,
+            group_parent_map=group_parent_map,
+        )
+
+    filtered_recipes = [recipes_by_id[recipe_id] for recipe_id in sorted(recipes_by_id)]
+    pump_entries = _build_pump_entries(pumps, ingredient_group_ids, ingredient_by_id)
+    if not pump_entries:
+        raise CocktailPiApiError("No pumps with assigned ingredients found")
+
+    current_eval = _evaluate_recipes_against_pumps(
+        filtered_recipes,
+        requirements_by_recipe_id=requirements_by_recipe_id,
+        pump_entries=pump_entries,
+    )
+    current_full_ids = set(current_eval["fullyAutomatableRecipeIds"])
+
+    current_pump_ingredient_ids = {
+        _as_positive_int(pump.get("ingredientId"))
+        for pump in pump_entries
+        if _as_positive_int(pump.get("ingredientId")) is not None
+    }
+
+    candidate_ingredient_ids = _collect_candidate_ingredient_ids(
+        ingredients,
+        candidate_source=candidate_source,
+        include_ingredient_ids=None,
+        exclude_ingredient_ids=None,
+    )
+    replacement_candidate_ids = [
+        ingredient_id
+        for ingredient_id in candidate_ingredient_ids
+        if ingredient_id not in current_pump_ingredient_ids
+    ]
+
+    pump_rows: list[dict[str, Any]] = []
+
+    for pump in pump_entries:
+        pump_id = _as_positive_int(pump.get("pumpId"))
+        if pump_id is None:
+            continue
+        pump_ingredient_id = _as_positive_int(pump.get("ingredientId"))
+
+        without_pump_entries = [entry for entry in pump_entries if _as_positive_int(entry.get("pumpId")) != pump_id]
+        without_eval = _evaluate_recipes_against_pumps(
+            filtered_recipes,
+            requirements_by_recipe_id=requirements_by_recipe_id,
+            pump_entries=without_pump_entries,
+        )
+        without_full_ids = set(without_eval["fullyAutomatableRecipeIds"])
+        lost_ids = sorted(current_full_ids - without_full_ids)
+        marginal_enabled_additional_count = len(lost_ids)
+
+        using_this_pump_ids = sorted(
+            recipe_id
+            for recipe_id in current_full_ids
+            if pump_id in set(current_eval.get("recipeToPumpUsage", {}).get(recipe_id, set()))
+        )
+
+        exact_ingredient_requirement_ids: list[int] = []
+        if pump_ingredient_id is not None:
+            for recipe_id in sorted(current_full_ids):
+                requirements = requirements_by_recipe_id.get(recipe_id, [])
+                if any(_as_positive_int(req.get("ingredientId")) == pump_ingredient_id for req in requirements):
+                    exact_ingredient_requirement_ids.append(recipe_id)
+
+        exact_ingredient_requirement_still_covered_ids = sorted(
+            recipe_id for recipe_id in exact_ingredient_requirement_ids if recipe_id in without_full_ids
+        )
+        strict_enabled_additional_count = len(exact_ingredient_requirement_ids)
+
+        alternative_rows: list[dict[str, Any]] = []
+        for candidate_id in replacement_candidate_ids:
+            candidate_ingredient = ingredient_by_id.get(candidate_id)
+            if not isinstance(candidate_ingredient, dict):
+                continue
+
+            simulated_entries = [dict(entry) for entry in without_pump_entries]
+            simulated_entries.append(
+                _build_simulated_pump_entry(
+                    pump_id=pump_id,
+                    ingredient=candidate_ingredient,
+                    ingredient_group_ids=ingredient_group_ids,
+                )
+            )
+
+            trial_eval = _evaluate_recipes_against_pumps(
+                filtered_recipes,
+                requirements_by_recipe_id=requirements_by_recipe_id,
+                pump_entries=simulated_entries,
+            )
+            trial_full_ids = set(trial_eval["fullyAutomatableRecipeIds"])
+            unlocked_vs_current = sorted(trial_full_ids - current_full_ids)
+
+            alternative_rows.append(
+                {
+                    "ingredientId": candidate_id,
+                    "ingredientName": candidate_ingredient.get("name") or f"Ingredient #{candidate_id}",
+                    "fullyAutomatableRecipeCount": len(trial_full_ids),
+                    "gainVsCurrent": len(trial_full_ids) - len(current_full_ids),
+                    "gainVsRemovedPumpBaseline": len(trial_full_ids) - len(without_full_ids),
+                    "newlyUnlockedComparedToCurrentCount": len(unlocked_vs_current),
+                    "newlyUnlockedComparedToCurrent": [
+                        {
+                            "id": recipe_id,
+                            "name": recipes_by_id.get(recipe_id, {}).get("name"),
+                        }
+                        for recipe_id in unlocked_vs_current
+                    ] if include_recipe_names else unlocked_vs_current,
+                }
+            )
+
+        alternative_rows.sort(
+            key=lambda row: (
+                -int(row.get("fullyAutomatableRecipeCount") or 0),
+                -int(row.get("gainVsCurrent") or 0),
+                str(row.get("ingredientName") or ""),
+            )
+        )
+
+        pump_rows.append(
+            {
+                "pumpId": pump_id,
+                "pumpName": pump.get("pumpName"),
+                "ingredientId": pump.get("ingredientId"),
+                "ingredientName": pump.get("ingredientName"),
+                "currentlyAutomatableUsingThisPumpCount": len(using_this_pump_ids),
+                "currentlyAutomatableUsingThisPump": [
+                    {
+                        "id": recipe_id,
+                        "name": recipes_by_id.get(recipe_id, {}).get("name"),
+                    }
+                    for recipe_id in using_this_pump_ids
+                ] if include_recipe_names else using_this_pump_ids,
+                "exactIngredientRequirementCount": len(exact_ingredient_requirement_ids),
+                "exactIngredientRequirementRecipes": [
+                    {
+                        "id": recipe_id,
+                        "name": recipes_by_id.get(recipe_id, {}).get("name"),
+                    }
+                    for recipe_id in exact_ingredient_requirement_ids
+                ] if include_recipe_names else exact_ingredient_requirement_ids,
+                "exactIngredientRequirementStillAutomatableIfRemovedCount": len(exact_ingredient_requirement_still_covered_ids),
+                # Strict interpretation: if a recipe explicitly requires this ingredient,
+                # removing this pump ingredient means that recipe is considered lost.
+                "enabledAdditionalCocktails": strict_enabled_additional_count,
+                "lostFullyAutomatableRecipeCountIfRemoved": strict_enabled_additional_count,
+                "lostFullyAutomatableRecipesIfRemoved": [
+                    {
+                        "id": recipe_id,
+                        "name": recipes_by_id.get(recipe_id, {}).get("name"),
+                    }
+                    for recipe_id in exact_ingredient_requirement_ids
+                ] if include_recipe_names else exact_ingredient_requirement_ids,
+                "marginalEnabledAdditionalCocktails": marginal_enabled_additional_count,
+                "marginalLostFullyAutomatableRecipeCountIfRemoved": marginal_enabled_additional_count,
+                "marginalLostFullyAutomatableRecipesIfRemoved": [
+                    {
+                        "id": recipe_id,
+                        "name": recipes_by_id.get(recipe_id, {}).get("name"),
+                    }
+                    for recipe_id in lost_ids
+                ] if include_recipe_names else lost_ids,
+                "bestAlternativesFromBar": alternative_rows[:alternatives_per_pump],
+            }
+        )
+
+    pump_rows.sort(
+        key=lambda row: (
+            int(row.get("enabledAdditionalCocktails") or 0),
+            str(row.get("pumpName") or ""),
+        )
+    )
+
+    least_contributors = pump_rows[: min(least_pumps_to_explain, len(pump_rows))]
+
+    return {
+        "summary": {
+            "recipesFetched": len(filtered_recipes),
+            "totalPages": total_pages,
+            "totalRecipesFromApi": total_elements,
+            "currentFullyAutomatableRecipeCount": len(current_full_ids),
+            "pumpsAnalyzed": len(pump_rows),
+            "candidateSource": candidate_source,
+            "replacementCandidateCount": len(replacement_candidate_ids),
+        },
+        "leastContributingPumps": least_contributors,
+        "allPumpContributions": pump_rows,
+    }
+
+
 def run() -> None:
     asyncio.run(_auto_login())
     mcp.run(transport="stdio")

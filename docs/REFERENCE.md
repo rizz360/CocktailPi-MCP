@@ -14,6 +14,7 @@ Core operations:
 - `create_recipe`: create a new recipe
 - `update_recipe`: update an existing recipe
 - `analyze_pump_ingredient_optimization`: strict full-automation and replacement analysis across all recipes
+- `analyze_current_pump_contributions`: identify least-contributing current pump ingredients and suggest stronger replacements from bar
 - `set_ingredient_in_bar`: mark one ingredient as present or absent in the bar inventory
 - `set_ingredients_in_bar`: bulk mark ingredients as present or absent in the bar inventory
 - `add_or_update_recipe_image`: add or replace a recipe image
