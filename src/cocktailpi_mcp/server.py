@@ -435,6 +435,7 @@ def _collect_ingredient_group_ids(
     group_parent_map: dict[int, int],
 ) -> set[int]:
     group_ids: set[int] = set()
+    ingredient_id = _as_positive_int(ingredient.get("id"))
 
     direct_group_id = _as_positive_int(ingredient.get("groupId"))
     ingredient_group_id = _as_positive_int(ingredient.get("ingredientGroupId"))
@@ -449,6 +450,11 @@ def _collect_ingredient_group_ids(
 
     if direct_group_id is not None and parent_group_id is not None:
         group_parent_map.setdefault(direct_group_id, parent_group_id)
+
+    # Catalog rows often model both ingredients and groups via id + parentGroupId
+    # without nested group objects. Keep this relation to enable ancestor expansion.
+    if ingredient_id is not None and parent_group_id is not None:
+        group_parent_map.setdefault(ingredient_id, parent_group_id)
 
     for key in ("group", "ingredientGroup", "parentGroup"):
         group_obj = ingredient.get(key)
