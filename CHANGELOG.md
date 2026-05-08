@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.6.0...v0.7.0) (2026-05-08)
+
+
+### Features
+
+* add set ingredient in bar functionality for individual and bulk updates ([a1b75b1](https://github.com/rizz360/CocktailPi-MCP/commit/a1b75b1384619e22e2b137678057a43f1a806005))
+* enhance optimal pump configuration suggestion with candidate filtering and ranking ([8e0d928](https://github.com/rizz360/CocktailPi-MCP/commit/8e0d9281db7f2465db151f65b211186c16badf90))
+
 ## [0.6.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.5.1...v0.6.0) (2026-05-08)
 
 
