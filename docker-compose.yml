@@ -1,0 +1,35 @@
+services:
+  cocktailpi-mcp:
+    # Build image from the local Dockerfile in this repository.
+    build: .
+    # Optional explicit tag for the locally built image.
+    image: cocktailpi-mcp
+    # Keep STDIN open because MCP uses stdio for transport.
+    stdin_open: true
+    # Allocate a TTY so interactive stdio behavior is reliable.
+    tty: true
+
+    # Optional: if your CocktailPi hostname is not resolvable from containers,
+    # map it to an IP here. Uncomment and adjust as needed.
+    # extra_hosts:
+    #   - "cocktailpi:100.65.196.99"
+
+    environment:
+      # Base URL of the CocktailPi backend API.
+      # Examples:
+      # - http://cocktailpi/
+      # - http://cocktailpi.tailac2ee.ts.net/
+      # - http://100.65.196.99/
+      COCKTAILPI_BASE_URL: http://cocktailpi/
+
+      # Option A (recommended for convenience): username/password auto-login.
+      # Replace with your CocktailPi credentials.
+      COCKTAILPI_USERNAME: your-username
+      COCKTAILPI_PASSWORD: your-password
+
+      # Option B (alternative): provide a static access token instead.
+      # If set, you can omit username/password.
+      # COCKTAILPI_ACCESS_TOKEN: your-jwt-token
+
+      # HTTP timeout (seconds) for calls to CocktailPi.
+      COCKTAILPI_TIMEOUT_SECONDS: 20
