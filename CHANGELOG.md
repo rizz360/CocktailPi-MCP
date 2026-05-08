@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/rizz360/CocktailPi-MCP/compare/v0.5.0...v0.5.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* normalize recipe owner handling and detect override failures ([6d6ca53](https://github.com/rizz360/CocktailPi-MCP/commit/6d6ca5339b98b9606f3cb381f005727ec8f10026))
+
 ## [0.5.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.4.0...v0.5.0) (2026-05-08)
 
 
