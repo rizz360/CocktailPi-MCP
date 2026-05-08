@@ -641,6 +641,29 @@ def _build_pump_entries(
     return entries
 
 
+def _build_simulated_pump_entry(
+    pump_id: int,
+    ingredient: dict[str, Any],
+    ingredient_group_ids: dict[int, set[int]],
+) -> dict[str, Any]:
+    ingredient_id = _as_positive_int(ingredient.get("id"))
+    if ingredient_id is None:
+        raise CocktailPiApiError("Ingredient is missing a valid id")
+
+    ingredient_name = ingredient.get("name")
+    if not isinstance(ingredient_name, str) or not ingredient_name.strip():
+        ingredient_name = f"Ingredient #{ingredient_id}"
+
+    return {
+        "pumpId": pump_id,
+        "pumpName": f"Optimized Slot #{pump_id}",
+        "ingredientId": ingredient_id,
+        "ingredientName": ingredient_name,
+        "coveredIngredientIds": {ingredient_id},
+        "coveredGroupIds": set(ingredient_group_ids.get(ingredient_id, set())),
+    }
+
+
 def _matching_pumps_for_requirement(
     requirement: dict[str, Any],
     pump_entries: list[dict[str, Any]],
@@ -707,6 +730,140 @@ def _evaluate_recipes_against_pumps(
         "missingByRecipeId": missing_by_recipe_id,
         "recipeToPumpUsage": recipe_to_pump_usage,
     }
+
+
+def _build_virtual_pump_entries_from_ingredient_ids(
+    ingredient_ids: list[int],
+    ingredient_group_ids: dict[int, set[int]],
+    ingredient_by_id: dict[int, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for index, ingredient_id in enumerate(ingredient_ids, start=1):
+        ingredient = ingredient_by_id.get(ingredient_id, {})
+        ingredient_name = ingredient.get("name")
+        if not isinstance(ingredient_name, str) or not ingredient_name.strip():
+            ingredient_name = f"Ingredient #{ingredient_id}"
+
+        entries.append(
+            {
+                "pumpId": index,
+                "pumpName": f"Optimized Pump #{index}",
+                "ingredientId": ingredient_id,
+                "ingredientName": ingredient_name,
+                "coveredIngredientIds": {ingredient_id},
+                "coveredGroupIds": set(ingredient_group_ids.get(ingredient_id, set())),
+            }
+        )
+    return entries
+
+
+def _find_best_configuration_ignoring_current(
+    *,
+    candidate_ingredient_ids: list[int],
+    pump_slots: int,
+    recipes: list[dict[str, Any]],
+    requirements_by_recipe_id: dict[int, list[dict[str, Any]]],
+    ingredient_group_ids: dict[int, set[int]],
+    ingredient_by_id: dict[int, dict[str, Any]],
+) -> tuple[list[int], set[int]]:
+    if pump_slots <= 0 or not candidate_ingredient_ids:
+        return [], set()
+
+    unique_candidates = sorted(set(candidate_ingredient_ids))
+    slots = min(pump_slots, len(unique_candidates))
+
+    selected: list[int] = []
+    remaining = set(unique_candidates)
+    best_full_ids: set[int] = set()
+
+    for _ in range(slots):
+        best_candidate: int | None = None
+        best_candidate_full_ids: set[int] = set()
+
+        for candidate_id in sorted(remaining):
+            trial_ids = selected + [candidate_id]
+            trial_pumps = _build_virtual_pump_entries_from_ingredient_ids(
+                trial_ids,
+                ingredient_group_ids=ingredient_group_ids,
+                ingredient_by_id=ingredient_by_id,
+            )
+            trial_eval = _evaluate_recipes_against_pumps(
+                recipes,
+                requirements_by_recipe_id=requirements_by_recipe_id,
+                pump_entries=trial_pumps,
+            )
+            trial_full_ids = set(trial_eval["fullyAutomatableRecipeIds"])
+
+            if (
+                best_candidate is None
+                or len(trial_full_ids) > len(best_candidate_full_ids)
+                or (
+                    len(trial_full_ids) == len(best_candidate_full_ids)
+                    and candidate_id < best_candidate
+                )
+            ):
+                best_candidate = candidate_id
+                best_candidate_full_ids = trial_full_ids
+
+        if best_candidate is None:
+            break
+
+        selected.append(best_candidate)
+        remaining.discard(best_candidate)
+        best_full_ids = best_candidate_full_ids
+
+    # Local improvement by 1-for-1 swaps.
+    improved = True
+    while improved and selected and remaining:
+        improved = False
+        current_pumps = _build_virtual_pump_entries_from_ingredient_ids(
+            selected,
+            ingredient_group_ids=ingredient_group_ids,
+            ingredient_by_id=ingredient_by_id,
+        )
+        current_eval = _evaluate_recipes_against_pumps(
+            recipes,
+            requirements_by_recipe_id=requirements_by_recipe_id,
+            pump_entries=current_pumps,
+        )
+        current_full_ids = set(current_eval["fullyAutomatableRecipeIds"])
+
+        swap_out_index: int | None = None
+        swap_in_id: int | None = None
+        swap_full_ids: set[int] = current_full_ids
+
+        for index, selected_id in enumerate(list(selected)):
+            for candidate_id in sorted(remaining):
+                trial_ids = list(selected)
+                trial_ids[index] = candidate_id
+                trial_pumps = _build_virtual_pump_entries_from_ingredient_ids(
+                    trial_ids,
+                    ingredient_group_ids=ingredient_group_ids,
+                    ingredient_by_id=ingredient_by_id,
+                )
+                trial_eval = _evaluate_recipes_against_pumps(
+                    recipes,
+                    requirements_by_recipe_id=requirements_by_recipe_id,
+                    pump_entries=trial_pumps,
+                )
+                trial_full_ids = set(trial_eval["fullyAutomatableRecipeIds"])
+
+                if len(trial_full_ids) > len(swap_full_ids):
+                    swap_out_index = index
+                    swap_in_id = candidate_id
+                    swap_full_ids = trial_full_ids
+
+        if swap_out_index is not None and swap_in_id is not None:
+            old_id = selected[swap_out_index]
+            selected[swap_out_index] = swap_in_id
+            remaining.discard(swap_in_id)
+            remaining.add(old_id)
+            best_full_ids = swap_full_ids
+            improved = True
+        else:
+            best_full_ids = current_full_ids
+
+    return selected, best_full_ids
 
 
 async def _fetch_all_recipe_details(
@@ -1149,6 +1306,7 @@ async def analyze_pump_ingredient_optimization(
     order_by: str = "name",
     expected_total_pages: int | None = None,
     expected_total_recipes: int | None = None,
+    optimize_pump_slots: int | None = None,
 ) -> dict[str, Any]:
     auth_token = _resolve_token(token)
 
@@ -1266,6 +1424,22 @@ async def analyze_pump_ingredient_optimization(
         for pump in pump_entries
         if _as_positive_int(pump.get("ingredientId")) is not None
     }
+
+    effective_pump_slots = optimize_pump_slots if isinstance(optimize_pump_slots, int) else None
+    if effective_pump_slots is None or effective_pump_slots <= 0:
+        effective_pump_slots = len(pump_entries)
+
+    optimization_candidates = [
+        ingredient
+        for ingredient in ingredients
+        if _as_positive_int(ingredient.get("id")) is not None
+        and str(ingredient.get("type") or "").strip().lower() == "automated"
+    ]
+    optimization_candidate_ids = [
+        _as_positive_int(ingredient.get("id"))
+        for ingredient in optimization_candidates
+        if _as_positive_int(ingredient.get("id")) is not None
+    ]
 
     candidate_ingredients: list[dict[str, Any]] = []
     for ingredient in ingredients:
@@ -1388,6 +1562,26 @@ async def analyze_pump_ingredient_optimization(
         for recipe_id, missing_items in sorted(missing_by_recipe_id.items())
     ]
 
+    optimized_ids, optimized_full_ids = _find_best_configuration_ignoring_current(
+        candidate_ingredient_ids=optimization_candidate_ids,
+        pump_slots=effective_pump_slots,
+        recipes=filtered_recipes,
+        requirements_by_recipe_id=requirements_by_recipe_id,
+        ingredient_group_ids=ingredient_group_ids,
+        ingredient_by_id=ingredient_by_id,
+    )
+    optimized_names = [
+        (ingredient_by_id.get(ingredient_id) or {}).get("name") or f"Ingredient #{ingredient_id}"
+        for ingredient_id in optimized_ids
+    ]
+    optimized_recipe_rows = [
+        {
+            "id": recipe_id,
+            "name": recipes_by_id.get(recipe_id, {}).get("name"),
+        }
+        for recipe_id in sorted(optimized_full_ids)
+    ]
+
     return {
         "summary": {
             "recipesFetched": len(filtered_recipes),
@@ -1402,7 +1596,255 @@ async def analyze_pump_ingredient_optimization(
         "bestReplacement": best_replacement,
         "fullyAutomatableRecipeIds": sorted(fully_automatable_recipe_ids),
         "blockedRecipes": blocked_recipe_rows,
+        "bestConfigurationIgnoringCurrent": {
+            "pumpSlots": effective_pump_slots,
+            "candidateIngredientCount": len(optimization_candidate_ids),
+            "optimizedIngredientIds": optimized_ids,
+            "optimizedIngredientNames": optimized_names,
+            "fullyAutomatableRecipeCount": len(optimized_full_ids),
+            "fullyAutomatableRecipeDeltaVsCurrent": len(optimized_full_ids)
+            - len(fully_automatable_recipe_ids),
+            "fullyAutomatableRecipes": optimized_recipe_rows,
+        },
     }
+
+
+@mcp.tool(
+    description=(
+        "Suggest an optimized pump configuration that maximizes fully automatable recipes, "
+        "independent of current pump assignments. Uses strict non-manual ingredient coverage rules "
+        "with direct ingredient and group matching. "
+        f"{TOKEN_HELP}"
+    )
+)
+async def suggest_optimal_pump_configuration(
+    token: str | None = None,
+    pump_slots: int | None = None,
+    owner_id: int | None = None,
+    in_collection: int | None = None,
+    in_category: int | None = None,
+    search_name: str | None = None,
+    fabricable: str = "all",
+    order_by: str = "name",
+    expected_total_pages: int | None = None,
+    expected_total_recipes: int | None = None,
+    include_blocked_recipes: bool = False,
+) -> dict[str, Any]:
+    auth_token = _resolve_token(token)
+
+    pumps_task = client.list_pumps(auth_token)
+    ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=False)
+    recipes_task = _fetch_all_recipe_details(
+        auth_token,
+        owner_id=owner_id,
+        in_collection=in_collection,
+        in_category=in_category,
+        search_name=search_name,
+        fabricable=fabricable,
+        order_by=order_by,
+    )
+
+    pumps, ingredients, recipe_details_result = await asyncio.gather(
+        pumps_task,
+        ingredients_task,
+        recipes_task,
+    )
+    recipes, total_pages, total_elements = recipe_details_result
+
+    if expected_total_pages is not None and expected_total_pages != total_pages:
+        raise CocktailPiApiError(
+            f"Expected total pages={expected_total_pages}, but API returned total pages={total_pages}."
+        )
+
+    if expected_total_recipes is not None and expected_total_recipes != total_elements:
+        raise CocktailPiApiError(
+            "Expected total recipes="
+            f"{expected_total_recipes}, but API returned total recipes={total_elements}."
+        )
+
+    ingredient_by_id, ingredient_group_ids, group_parent_map = _build_ingredient_indexes(ingredients)
+
+    recipes_by_id: dict[int, dict[str, Any]] = {}
+    requirements_by_recipe_id: dict[int, list[dict[str, Any]]] = {}
+    for recipe in recipes:
+        recipe_id = _as_positive_int(recipe.get("id"))
+        if recipe_id is None:
+            continue
+        recipes_by_id[recipe_id] = recipe
+        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(
+            recipe,
+            ingredient_group_ids=ingredient_group_ids,
+            group_parent_map=group_parent_map,
+        )
+
+    filtered_recipes = [recipes_by_id[recipe_id] for recipe_id in sorted(recipes_by_id)]
+
+    current_pump_entries = _build_pump_entries(pumps, ingredient_group_ids, ingredient_by_id)
+    current_eval = _evaluate_recipes_against_pumps(
+        filtered_recipes,
+        requirements_by_recipe_id=requirements_by_recipe_id,
+        pump_entries=current_pump_entries,
+    )
+    current_fully_ids = set(current_eval["fullyAutomatableRecipeIds"])
+
+    if pump_slots is None:
+        pump_slots = len(current_pump_entries)
+        if pump_slots < 1:
+            pump_slots = 8
+
+    if pump_slots < 1:
+        raise CocktailPiApiError("pump_slots must be >= 1")
+
+    candidate_ingredients = [
+        ingredient
+        for ingredient in ingredients
+        if isinstance(ingredient, dict)
+        and isinstance(ingredient.get("type"), str)
+        and ingredient.get("type") != "group"
+        and _as_positive_int(ingredient.get("id")) is not None
+    ]
+    if not candidate_ingredients:
+        raise CocktailPiApiError("No candidate ingredients available for optimization")
+
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[int] = set()
+
+    # Greedy selection by marginal gain.
+    for slot in range(1, pump_slots + 1):
+        best_candidate: dict[str, Any] | None = None
+        best_eval_count = -1
+
+        for ingredient in candidate_ingredients:
+            ingredient_id = _as_positive_int(ingredient.get("id"))
+            if ingredient_id is None or ingredient_id in selected_ids:
+                continue
+
+            simulated_entries = list(selected)
+            simulated_entries.append(
+                _build_simulated_pump_entry(slot, ingredient, ingredient_group_ids)
+            )
+            simulated_eval = _evaluate_recipes_against_pumps(
+                filtered_recipes,
+                requirements_by_recipe_id=requirements_by_recipe_id,
+                pump_entries=simulated_entries,
+            )
+            full_count = len(simulated_eval["fullyAutomatableRecipeIds"])
+
+            if full_count > best_eval_count:
+                best_eval_count = full_count
+                best_candidate = ingredient
+
+        if best_candidate is None:
+            break
+
+        selected_entry = _build_simulated_pump_entry(slot, best_candidate, ingredient_group_ids)
+        selected.append(selected_entry)
+        selected_ids.add(int(selected_entry["ingredientId"]))
+
+    # One-pass local swap improvement.
+    improved = True
+    while improved:
+        improved = False
+        baseline_eval = _evaluate_recipes_against_pumps(
+            filtered_recipes,
+            requirements_by_recipe_id=requirements_by_recipe_id,
+            pump_entries=selected,
+        )
+        baseline_count = len(baseline_eval["fullyAutomatableRecipeIds"])
+
+        for index, existing in enumerate(list(selected)):
+            existing_id = _as_positive_int(existing.get("ingredientId"))
+            if existing_id is None:
+                continue
+
+            for ingredient in candidate_ingredients:
+                candidate_id = _as_positive_int(ingredient.get("id"))
+                if candidate_id is None or candidate_id == existing_id:
+                    continue
+                if candidate_id in selected_ids:
+                    continue
+
+                trial = list(selected)
+                trial[index] = _build_simulated_pump_entry(
+                    _as_positive_int(existing.get("pumpId")) or (index + 1),
+                    ingredient,
+                    ingredient_group_ids,
+                )
+                trial_eval = _evaluate_recipes_against_pumps(
+                    filtered_recipes,
+                    requirements_by_recipe_id=requirements_by_recipe_id,
+                    pump_entries=trial,
+                )
+                trial_count = len(trial_eval["fullyAutomatableRecipeIds"])
+
+                if trial_count > baseline_count:
+                    selected_ids.remove(existing_id)
+                    selected_ids.add(candidate_id)
+                    selected = trial
+                    improved = True
+                    break
+
+            if improved:
+                break
+
+    final_eval = _evaluate_recipes_against_pumps(
+        filtered_recipes,
+        requirements_by_recipe_id=requirements_by_recipe_id,
+        pump_entries=selected,
+    )
+    final_full_ids = set(final_eval["fullyAutomatableRecipeIds"])
+    unlocked_vs_current_ids = sorted(final_full_ids - current_fully_ids)
+
+    suggested_configuration = [
+        {
+            "slot": _as_positive_int(entry.get("pumpId")) or (idx + 1),
+            "ingredientId": entry.get("ingredientId"),
+            "ingredientName": entry.get("ingredientName"),
+        }
+        for idx, entry in enumerate(selected)
+    ]
+
+    fully_rows = [
+        {
+            "id": recipe_id,
+            "name": recipes_by_id.get(recipe_id, {}).get("name"),
+        }
+        for recipe_id in sorted(final_full_ids)
+    ]
+
+    result: dict[str, Any] = {
+        "summary": {
+            "recipesFetched": len(filtered_recipes),
+            "totalPages": total_pages,
+            "totalRecipesFromApi": total_elements,
+            "pumpSlotsRequested": pump_slots,
+            "suggestedSlotCount": len(suggested_configuration),
+            "currentFullyAutomatableRecipeCount": len(current_fully_ids),
+            "optimizedFullyAutomatableRecipeCount": len(final_full_ids),
+            "newlyUnlockedComparedToCurrentCount": len(unlocked_vs_current_ids),
+        },
+        "suggestedConfiguration": suggested_configuration,
+        "optimizedFullyAutomatableRecipes": fully_rows,
+        "newlyUnlockedComparedToCurrent": [
+            {
+                "id": recipe_id,
+                "name": recipes_by_id.get(recipe_id, {}).get("name"),
+            }
+            for recipe_id in unlocked_vs_current_ids
+        ],
+    }
+
+    if include_blocked_recipes:
+        result["optimizedBlockedRecipes"] = [
+            {
+                "id": recipe_id,
+                "name": recipes_by_id.get(recipe_id, {}).get("name"),
+                "missingIngredients": missing_items,
+            }
+            for recipe_id, missing_items in sorted(final_eval["missingByRecipeId"].items())
+        ]
+
+    return result
 
 
 def run() -> None:
