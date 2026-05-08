@@ -1,5 +1,9 @@
 # CocktailPi MCP Server
 
+[![CI](https://github.com/rizz360/cocktailpi-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/rizz360/cocktailpi-mcp/actions/workflows/ci.yml)
+[![Release Please](https://github.com/rizz360/cocktailpi-mcp/actions/workflows/release-please.yml/badge.svg)](https://github.com/rizz360/cocktailpi-mcp/actions/workflows/release-please.yml)
+[![GHCR](https://img.shields.io/badge/ghcr-cocktailpi--mcp-blue?logo=docker)](https://ghcr.io/rizz360/cocktailpi-mcp)
+
 Model Context Protocol (MCP) server that exposes CocktailPi backend operations as MCP tools.
 
 ## Why this implementation
@@ -76,10 +80,10 @@ python -m cocktailpi_mcp.main
 
 ## Docker usage
 
-Build image:
+Pull published image:
 
 ```bash
-docker build -t cocktailpi-mcp .
+docker pull ghcr.io/rizz360/cocktailpi-mcp:latest
 ```
 
 Run with env vars:
@@ -88,7 +92,7 @@ Run with env vars:
 docker run --rm -i \
   -e COCKTAILPI_BASE_URL=http://host.docker.internal:8080 \
   -e COCKTAILPI_ACCESS_TOKEN=YOUR_TOKEN \
-  cocktailpi-mcp
+  ghcr.io/rizz360/cocktailpi-mcp:latest
 ```
 
 Docker Compose example:
@@ -96,8 +100,7 @@ Docker Compose example:
 ```yaml
 services:
   cocktailpi-mcp:
-    build: .
-    image: cocktailpi-mcp
+    image: ghcr.io/rizz360/cocktailpi-mcp:latest
     stdin_open: true
     tty: true
     environment:
@@ -109,7 +112,7 @@ services:
 Start it with:
 
 ```bash
-docker compose up --build
+docker compose up
 ```
 
 ## MCP client config example

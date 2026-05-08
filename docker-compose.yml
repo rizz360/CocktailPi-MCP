@@ -1,9 +1,7 @@
 services:
   cocktailpi-mcp:
-    # Build image from the local Dockerfile in this repository.
-    build: .
-    # Optional explicit tag for the locally built image.
-    image: cocktailpi-mcp
+    # Pull published image from GHCR.
+    image: ghcr.io/rizz360/cocktailpi-mcp:latest
     # Keep STDIN open because MCP uses stdio for transport.
     stdin_open: true
     # Allocate a TTY so interactive stdio behavior is reliable.
