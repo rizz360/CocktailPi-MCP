@@ -72,7 +72,9 @@ Use `list_ingredients`, `list_categories`, and `list_glasses` to discover valid 
 
 Common gotchas when creating/updating recipes:
 - Use `categoryIds` (not `categories`) and include it even if empty (`[]`).
-- Include `ownerId` explicitly.
+- Include `ownerId` explicitly when possible. If omitted, MCP tries to infer it from JWT claims.
+- `ownerId` values that do not match the authenticated user require an admin-like token.
+- If backend ignores owner override, MCP now raises an explicit error instead of silently succeeding.
 - Ingredient entries must be flat fields like `ingredientId` and `ingredientType` (not nested ingredient object).
 
 ## Image operations
@@ -92,4 +94,5 @@ For image add/update/remove, CocktailPi currently uses recipe create/update mult
 Image tool payload behavior:
 - `recipe_json` is optional for `add_or_update_recipe_image`, `add_or_update_recipe_image_from_url`, and `delete_recipe_image`.
 - When omitted, MCP fetches the current recipe and reuses it as update payload.
-- If auto-derived payload cannot determine required fields like `ownerId`, pass `recipe_json` explicitly.
+- During auto-fetch, MCP now normalizes invalid/missing owner ids from JWT claims when possible.
+- If token lacks owner claims and `ownerId` is missing, pass `recipe_json.ownerId` explicitly.

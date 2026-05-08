@@ -169,7 +169,9 @@ Payload gotchas:
 - Use `categoryIds` (not `categories`) and include it even if empty.
 - Keep ingredient entries flat using `ingredientId` and `ingredientType` (not nested ingredient object).
 - `ingredientType` values are backend-defined; use `get_recipe` on an existing recipe to copy a valid value.
-- Include `ownerId` explicitly.
+- Include `ownerId` explicitly when possible; MCP can infer it from JWT claims if omitted.
+- Non-matching `ownerId` values require an admin-like token, otherwise MCP rejects the write.
+- If backend ignores admin owner override, MCP returns an explicit owner mismatch error.
 
 ## Troubleshooting
 
