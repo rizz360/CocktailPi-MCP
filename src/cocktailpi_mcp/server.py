@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -9,20 +10,37 @@ from cocktailpi_mcp.config import load_settings
 
 settings = load_settings()
 client = CocktailPiClient(settings.base_url, settings.timeout_seconds)
+
+# Resolved at startup: either the static token or one obtained via auto-login.
+_resolved_token: str | None = settings.access_token
+
+
+async def _auto_login() -> None:
+    """If no static token is configured but credentials are, perform login once."""
+    global _resolved_token
+    if _resolved_token:
+        return
+    if settings.username and settings.password:
+        result = await client.login(username=settings.username, password=settings.password)
+        _resolved_token = result.access_token
+
+
 mcp = FastMCP(
     "CocktailPi MCP",
     instructions=(
         "MCP tools for CocktailPi recipe and pump operations. "
-        "Use login first to get an access token, or configure COCKTAILPI_ACCESS_TOKEN."
+        "Use login first to get an access token, or configure COCKTAILPI_ACCESS_TOKEN "
+        "or COCKTAILPI_USERNAME + COCKTAILPI_PASSWORD for auto-login."
     ),
 )
 
 
 def _resolve_token(explicit_token: str | None) -> str:
-    token = (explicit_token or settings.access_token or "").strip()
+    token = (explicit_token or _resolved_token or "").strip()
     if not token:
         raise CocktailPiApiError(
-            "No access token available. Call login or set COCKTAILPI_ACCESS_TOKEN."
+            "No access token available. Call login, set COCKTAILPI_ACCESS_TOKEN, "
+            "or set COCKTAILPI_USERNAME + COCKTAILPI_PASSWORD."
         )
     return token
 
@@ -182,4 +200,5 @@ async def list_glasses(token: str | None = None) -> list[dict[str, Any]]:
 
 
 def run() -> None:
+    asyncio.run(_auto_login())
     mcp.run(transport="stdio")
