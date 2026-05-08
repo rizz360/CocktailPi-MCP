@@ -10,6 +10,8 @@ This README focuses on getting it running fast for end users.
 
 ## Quick start
 
+This MCP server is started on demand by your AI client (stdio). It is not a background web service you keep running with `docker compose up -d`.
+
 ### 1) Have CocktailPi running
 
 Before connecting AI, make sure your CocktailPi backend is reachable from Docker.
@@ -19,9 +21,9 @@ You need:
 - A backend URL (for example `http://cocktailpi/`, `http://localhost:8080`, or your Tailscale/LAN URL)
 - Credentials or a JWT token
 
-### 2) Adjust Docker Compose settings
+### 2) Set connection values
 
-Use [docker-compose.yml](docker-compose.yml) and edit the environment section:
+Use [docker-compose.yml](docker-compose.yml) as a config template and edit the environment section:
 
 ```yaml
 services:
@@ -42,16 +44,13 @@ services:
       COCKTAILPI_TIMEOUT_SECONDS: 20
 ```
 
-Start/stop:
-
-```bash
-docker compose up -d
-docker compose down
-```
+  Do not run `docker compose up` for normal MCP usage.
 
 ### 3) Connect your AI client
 
 Most MCP clients accept an `mcpServers` command-based config.
+
+Important: this server uses stdio transport, so your AI client launches the command below and communicates over that process's stdin/stdout.
 
 #### Claude Desktop (macOS)
 
@@ -125,6 +124,7 @@ Helper operations:
 - Connection errors usually mean `COCKTAILPI_BASE_URL` is not reachable from Docker.
 - Auth errors usually mean wrong credentials/token or missing permissions.
 - If your AI client cannot run `docker compose`, use the direct `docker run` config shown above.
+- If you started this with `docker compose up`, stop it and use the MCP client config instead.
 
 ## Advanced reference
 
