@@ -35,40 +35,16 @@ Use these values in the command args:
 - Option B: `COCKTAILPI_ACCESS_TOKEN` (instead of username/password)
 - Optional: `COCKTAILPI_TIMEOUT_SECONDS=20`
 
-### 3) Copy-paste config examples
+### 3) Add the same server config in your client
 
-#### Claude Desktop (macOS)
+The server command is the same across MCP clients. Only the config file path changes.
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Config file locations:
+- Claude Desktop (macOS): `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Cursor: `.cursor/mcp.json`
+- Other MCP clients: use the client's `mcpServers` config file
 
-```json
-{
-  "mcpServers": {
-    "cocktailpi": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i", "--pull", "always",
-        "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
-        "-e", "COCKTAILPI_USERNAME=your-username",
-        "-e", "COCKTAILPI_PASSWORD=your-password",
-        "ghcr.io/rizz360/cocktailpi-mcp:latest"
-      ]
-    }
-  }
-}
-```
-
-Put your credentials in the `-e` values above, or replace username/password with:
-
-```json
-"-e", "COCKTAILPI_ACCESS_TOKEN=your-jwt-token"
-```
-
-The `"--pull", "always"` args ensure each launch checks for the newest image.
-
-#### Cursor
-
-Create or edit `.cursor/mcp.json`:
+Use this config block:
 
 ```json
 {
@@ -87,26 +63,11 @@ Create or edit `.cursor/mcp.json`:
 }
 ```
 
-#### Other MCP clients
+Use either username/password or a token in the `-e` values:
+- Username/password: `COCKTAILPI_USERNAME` + `COCKTAILPI_PASSWORD`
+- Token: `COCKTAILPI_ACCESS_TOKEN=your-jwt-token` (replace the username/password env vars)
 
-Use a direct image command like this:
-
-```json
-{
-  "mcpServers": {
-    "cocktailpi": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i", "--pull", "always",
-        "-e", "COCKTAILPI_BASE_URL=http://cocktailpi/",
-        "-e", "COCKTAILPI_USERNAME=your-username",
-        "-e", "COCKTAILPI_PASSWORD=your-password",
-        "ghcr.io/rizz360/cocktailpi-mcp:latest"
-      ]
-    }
-  }
-}
-```
+`"--pull", "always"` makes Docker check for a newer image at each launch.
 
 ### 4) What AI can do once connected
 
