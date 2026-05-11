@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/rizz360/CocktailPi-MCP/compare/v0.8.0...v0.8.1) (2026-05-11)
+
+
+### Documentation
+
+* update README to clarify MCP client configuration steps ([1441098](https://github.com/rizz360/CocktailPi-MCP/commit/144109825b29bfb31afb4f2c62d5401ad0625574))
+
 ## [0.8.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.7.0...v0.8.0) (2026-05-08)
 
 
