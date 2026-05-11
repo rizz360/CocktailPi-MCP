@@ -199,3 +199,8 @@ Detailed endpoint mapping and recipe payload examples are in [docs/REFERENCE.md]
 ## Development
 
 Contributor and local source setup instructions are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+This project is licensed under the European Union Public Licence v1.2 (EUPL-1.2).
+See [LICENSE](LICENSE) for details.
