@@ -1932,6 +1932,16 @@ async def suggest_optimal_pump_configuration(
     }
 
     if include_blocked_recipes:
+        best_pump_entries = _build_virtual_pump_entries_from_ingredient_ids(
+            best_selected_ids,
+            ingredient_group_ids=ingredient_group_ids,
+            ingredient_by_id=ingredient_by_id,
+        )
+        final_eval = _evaluate_recipes_against_pumps(
+            filtered_recipes,
+            requirements_by_recipe_id=requirements_by_recipe_id,
+            pump_entries=best_pump_entries,
+        )
         result["optimizedBlockedRecipes"] = [
             {
                 "id": recipe_id,
