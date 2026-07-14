@@ -144,6 +144,42 @@ Payload gotchas:
 - Auth errors usually mean wrong credentials/token or missing permissions.
 - If you started this with `docker compose up`, stop it and use MCP client config that runs `docker run` on demand.
 - `no matching manifest for linux/arm64/v8` means the published tag does not include Apple Silicon yet. Use `--platform linux/amd64` in docker args as a temporary workaround, then remove it after a multi-arch release is published.
+- `failed to connect to the docker API at unix:///.../.docker/run/docker.sock` usually means your MCP client tried to start this server before Docker Desktop finished booting.
+  - Start Docker Desktop first, wait until it reports running, then reconnect MCP.
+  - Verify with `docker version` and `ls -la ~/.docker/run/docker.sock`.
+  - If this keeps happening, use a source-based MCP command (no Docker daemon required).
+    First install dependencies in the same Python interpreter your MCP client will run:
+
+```bash
+cd /path/to/CocktailPi-MCP
+python -m pip install -r requirements.txt
+```
+
+Then use an absolute-path launch command (recommended, avoids relative `PYTHONPATH` issues):
+
+```json
+{
+  "mcpServers": {
+    "cocktailpi": {
+      "command": "sh",
+      "args": [
+        "-lc",
+        "cd /path/to/CocktailPi-MCP && PYTHONPATH=/path/to/CocktailPi-MCP/src /path/to/python -m cocktailpi_mcp.main"
+      ],
+      "env": {
+        "COCKTAILPI_BASE_URL": "http://cocktailpi/",
+        "COCKTAILPI_USERNAME": "your-username",
+        "COCKTAILPI_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+Tips:
+- Replace `/path/to/python` with the exact interpreter path (for example from `which python`).
+- If you still see `ModuleNotFoundError`, install again using that exact interpreter:
+  `/path/to/python -m pip install -r /path/to/CocktailPi-MCP/requirements.txt`.
 
 ## Optional: use docker-compose.yml as a value template
 
