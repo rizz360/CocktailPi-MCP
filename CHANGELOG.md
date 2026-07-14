@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.1](https://github.com/rizz360/CocktailPi-MCP/compare/v0.8.0...v0.8.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* flatten production steps when reusing recipe data for image updates ([0c520c5](https://github.com/rizz360/CocktailPi-MCP/commit/0c520c55e1d0d2bf5f60b3318991b5e0d5947758))
+* only simulate automated ingredients as pump replacements ([713a171](https://github.com/rizz360/CocktailPi-MCP/commit/713a17139cb8a02da71b4964765d27e770497572))
+* re-login automatically when the auto-login token expires ([1af3f3e](https://github.com/rizz360/CocktailPi-MCP/commit/1af3f3e426e909ccd8878e7873a29f43b3698e3c))
+* resolve NameError when include_blocked_recipes is requested ([35d0f0a](https://github.com/rizz360/CocktailPi-MCP/commit/35d0f0a1a39931ff79c69f653570a266148c0e79))
+* stop treating sibling ingredients as interchangeable in pump analysis ([63ec755](https://github.com/rizz360/CocktailPi-MCP/commit/63ec75546223589622812ec84e171a7f63fa8a52))
+
+
+### Performance Improvements
+
+* reuse one HTTP client and cut redundant work in analysis tools ([81e8d90](https://github.com/rizz360/CocktailPi-MCP/commit/81e8d90e9e9ec5ec50963de8c43082e4ca8abda0))
+
+
+### Documentation
+
+* add comprehensive API reference documentation for CocktailPi ([fc0129c](https://github.com/rizz360/CocktailPi-MCP/commit/fc0129cf8dedd14a1c2e9aa7e1a8ef1866c74246))
+* enhance README with troubleshooting tips for Docker API connection issues ([5829ea5](https://github.com/rizz360/CocktailPi-MCP/commit/5829ea5c4f966fc063034e6b60049ed325f622a2))
+* update README to clarify MCP client configuration steps ([1441098](https://github.com/rizz360/CocktailPi-MCP/commit/144109825b29bfb31afb4f2c62d5401ad0625574))
+
 ## [0.8.0](https://github.com/rizz360/CocktailPi-MCP/compare/v0.7.0...v0.8.0) (2026-05-08)
 
 
