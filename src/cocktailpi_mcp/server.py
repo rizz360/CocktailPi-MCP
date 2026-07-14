@@ -1650,14 +1650,13 @@ async def analyze_pump_ingredient_optimization(
         if _as_positive_int(ingredient.get("id")) is not None
     ]
 
-    candidate_ingredients: list[dict[str, Any]] = []
-    for ingredient in ingredients:
-        ingredient_id = _as_positive_int(ingredient.get("id"))
-        if ingredient_id is None:
-            continue
-        if ingredient_id in current_pump_ingredient_ids:
-            continue
-        candidate_ingredients.append(ingredient)
+    # Only automated ingredients can be assigned to a pump; manual ingredients
+    # and groups must not be simulated as replacements.
+    candidate_ingredients = [
+        ingredient
+        for ingredient in optimization_candidates
+        if _as_positive_int(ingredient.get("id")) not in current_pump_ingredient_ids
+    ]
 
     baseline_ids = set(fully_automatable_recipe_ids)
     best_replacement: dict[str, Any] | None = None
