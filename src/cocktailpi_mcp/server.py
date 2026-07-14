@@ -554,62 +554,62 @@ def _build_ingredient_indexes(
     return by_id, ingredient_group_ids, group_parent_map
 
 
-def _extract_step_ingredient_group_ids(
+def _extract_group_requirement_ids(
     step_ingredient: dict[str, Any],
-    ingredient_group_ids: dict[int, set[int]],
-    group_parent_map: dict[int, int],
     ingredient_id: int | None,
-    ingredient_type: str,
 ) -> set[int]:
+    # Group requirements must match the requested group itself.
+    # Do not include ancestors here; otherwise sibling groups become interchangeable.
     group_ids: set[int] = set()
-    is_group_requirement = "group" in ingredient_type
 
-    nested_ingredient = step_ingredient.get("ingredient")
-
-    if is_group_requirement:
-        # Group requirements must match the requested group itself.
-        # Do not include ancestors here; otherwise sibling groups become interchangeable.
-        for key in ("groupId", "ingredientGroupId"):
-            group_id = _as_positive_int(step_ingredient.get(key))
-            if group_id is not None:
-                group_ids.add(group_id)
-
-        if isinstance(nested_ingredient, dict):
-            nested_id = _as_positive_int(nested_ingredient.get("id"))
-            nested_type = nested_ingredient.get("type")
-            nested_type_label = nested_type.strip().lower() if isinstance(nested_type, str) else ""
-            if "group" in nested_type_label and nested_id is not None:
-                group_ids.add(nested_id)
-
-            for key in ("groupId", "ingredientGroupId"):
-                group_id = _as_positive_int(nested_ingredient.get(key))
-                if group_id is not None:
-                    group_ids.add(group_id)
-
-        if not group_ids and ingredient_id is not None:
-            group_ids.add(ingredient_id)
-
-        return group_ids
-
-    for key in ("groupId", "ingredientGroupId", "parentGroupId"):
+    for key in ("groupId", "ingredientGroupId"):
         group_id = _as_positive_int(step_ingredient.get(key))
         if group_id is not None:
             group_ids.add(group_id)
 
+    nested_ingredient = step_ingredient.get("ingredient")
     if isinstance(nested_ingredient, dict):
-        for key in ("groupId", "ingredientGroupId", "parentGroupId"):
+        nested_id = _as_positive_int(nested_ingredient.get("id"))
+        nested_type = nested_ingredient.get("type")
+        nested_type_label = nested_type.strip().lower() if isinstance(nested_type, str) else ""
+        if "group" in nested_type_label and nested_id is not None:
+            group_ids.add(nested_id)
+
+        for key in ("groupId", "ingredientGroupId"):
             group_id = _as_positive_int(nested_ingredient.get(key))
             if group_id is not None:
                 group_ids.add(group_id)
 
-        for key in ("group", "ingredientGroup", "parentGroup"):
-            group_obj = nested_ingredient.get(key)
-            if isinstance(group_obj, dict):
-                group_ids.update(_extract_group_chain_from_group_obj(group_obj, group_parent_map))
+    if not group_ids and ingredient_id is not None:
+        group_ids.add(ingredient_id)
 
-    # For automated leaf requirements, keep only direct group ids.
-    # This avoids treating sibling leaves as interchangeable via shared ancestors.
     return group_ids
+
+
+def _extract_group_requirement_leaf_ids(
+    step_ingredient: dict[str, Any],
+    group_ids: set[int],
+    ingredient_by_id: dict[int, dict[str, Any]],
+) -> set[int]:
+    # Group rows expose leafIds: the transitive set of concrete ingredients the
+    # group resolves to. This is the backend's authoritative group coverage.
+    leaf_ids: set[int] = set()
+
+    sources: list[Any] = [step_ingredient.get("ingredient")]
+    sources.extend(ingredient_by_id.get(group_id) for group_id in group_ids)
+
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        raw_leaf_ids = source.get("leafIds")
+        if not isinstance(raw_leaf_ids, list):
+            continue
+        for value in raw_leaf_ids:
+            leaf_id = _as_positive_int(value)
+            if leaf_id is not None:
+                leaf_ids.add(leaf_id)
+
+    return leaf_ids
 
 
 def _describe_requirement(requirement: dict[str, Any]) -> dict[str, Any]:
@@ -623,8 +623,7 @@ def _describe_requirement(requirement: dict[str, Any]) -> dict[str, Any]:
 
 def _build_recipe_requirements(
     recipe: dict[str, Any],
-    ingredient_group_ids: dict[int, set[int]],
-    group_parent_map: dict[int, int],
+    ingredient_by_id: dict[int, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     requirements: list[dict[str, Any]] = []
     for step_ingredient in _extract_step_ingredients(recipe):
@@ -634,20 +633,26 @@ def _build_recipe_requirements(
         ingredient_id = _extract_ingredient_id(step_ingredient)
         ingredient_type = _ingredient_type_label(step_ingredient)
         ingredient_name = _extract_ingredient_name(step_ingredient, ingredient_id)
-        group_ids = _extract_step_ingredient_group_ids(
-            step_ingredient,
-            ingredient_group_ids=ingredient_group_ids,
-            group_parent_map=group_parent_map,
-            ingredient_id=ingredient_id,
-            ingredient_type=ingredient_type,
-        )
+        is_group = "group" in ingredient_type
+
+        group_ids: set[int] = set()
+        leaf_ids: set[int] = set()
+        if is_group:
+            group_ids = _extract_group_requirement_ids(step_ingredient, ingredient_id)
+            leaf_ids = _extract_group_requirement_leaf_ids(
+                step_ingredient,
+                group_ids=group_ids,
+                ingredient_by_id=ingredient_by_id,
+            )
 
         requirements.append(
             {
                 "ingredientId": ingredient_id,
                 "ingredientName": ingredient_name,
                 "ingredientType": ingredient_type,
+                "isGroup": is_group,
                 "groupIds": group_ids,
+                "leafIds": leaf_ids,
             }
         )
     return requirements
@@ -719,20 +724,30 @@ def _matching_pumps_for_requirement(
     pump_entries: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     requirement_ingredient_id = requirement.get("ingredientId")
-    requirement_group_ids = requirement.get("groupIds") or set()
+    requirement_group_ids = set(requirement.get("groupIds") or set())
+    requirement_leaf_ids = set(requirement.get("leafIds") or set())
+    is_group = bool(requirement.get("isGroup"))
 
     matches: list[dict[str, Any]] = []
     for pump in pump_entries:
         covered_ingredient_ids = pump.get("coveredIngredientIds") or set()
         covered_group_ids = pump.get("coveredGroupIds") or set()
 
-        ingredient_match = (
-            isinstance(requirement_ingredient_id, int)
-            and requirement_ingredient_id in covered_ingredient_ids
-        )
-        group_match = bool(set(requirement_group_ids) & set(covered_group_ids))
+        if is_group:
+            # A group is covered by any pump whose ingredient is one of the
+            # group's leaves (leafIds) or sits below the group in the hierarchy.
+            matched = bool(requirement_group_ids & set(covered_group_ids)) or bool(
+                requirement_leaf_ids & set(covered_ingredient_ids)
+            )
+        else:
+            # CocktailPi never substitutes concrete ingredients, so a leaf
+            # requirement is only covered by a pump with exactly that ingredient.
+            matched = (
+                isinstance(requirement_ingredient_id, int)
+                and requirement_ingredient_id in covered_ingredient_ids
+            )
 
-        if ingredient_match or group_match:
+        if matched:
             matches.append(pump)
 
     return matches
@@ -1549,11 +1564,7 @@ async def analyze_pump_ingredient_optimization(
             continue
 
         recipes_by_id[recipe_id] = recipe
-        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(
-            recipe,
-            ingredient_group_ids=ingredient_group_ids,
-            group_parent_map=group_parent_map,
-        )
+        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(recipe, ingredient_by_id)
 
     filtered_recipes = [recipes_by_id[recipe_id] for recipe_id in sorted(recipes_by_id)]
     current_eval = _evaluate_recipes_against_pumps(
@@ -1873,11 +1884,7 @@ async def suggest_optimal_pump_configuration(
         if recipe_id is None:
             continue
         recipes_by_id[recipe_id] = recipe
-        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(
-            recipe,
-            ingredient_group_ids=ingredient_group_ids,
-            group_parent_map=group_parent_map,
-        )
+        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(recipe, ingredient_by_id)
 
     filtered_recipes = [recipes_by_id[recipe_id] for recipe_id in sorted(recipes_by_id)]
 
@@ -2073,11 +2080,7 @@ async def analyze_current_pump_contributions(
         if recipe_id is None:
             continue
         recipes_by_id[recipe_id] = recipe
-        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(
-            recipe,
-            ingredient_group_ids=ingredient_group_ids,
-            group_parent_map=group_parent_map,
-        )
+        requirements_by_recipe_id[recipe_id] = _build_recipe_requirements(recipe, ingredient_by_id)
 
     filtered_recipes = [recipes_by_id[recipe_id] for recipe_id in sorted(recipes_by_id)]
     pump_entries = _build_pump_entries(pumps, ingredient_group_ids, ingredient_by_id)
