@@ -22,9 +22,28 @@ class CocktailPiLoginResult:
 
 
 class CocktailPiClient:
+    # Keep concurrent requests bounded; CocktailPi usually runs on a Raspberry Pi.
+    MAX_CONNECTIONS = 8
+
     def __init__(self, base_url: str, timeout_seconds: float = 20.0) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(
+                    max_connections=self.MAX_CONNECTIONS,
+                    max_keepalive_connections=self.MAX_CONNECTIONS,
+                ),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
 
     async def login(self, username: str, password: str, remember: bool = True) -> CocktailPiLoginResult:
         payload = {
@@ -271,15 +290,14 @@ class CocktailPiClient:
         url = f"{self._base_url}{path}"
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.request(
-                    method,
-                    url,
-                    headers=headers,
-                    params=params,
-                    json=json,
-                    files=files,
-                )
+            response = await self._http().request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                json=json,
+                files=files,
+            )
         except httpx.HTTPError as exc:
             raise CocktailPiApiError(f"Request to CocktailPi failed: {exc}") from exc
 

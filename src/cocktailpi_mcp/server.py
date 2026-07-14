@@ -1174,13 +1174,12 @@ async def list_recipes(
     if not isinstance(content, list):
         return recipes_page
 
-    details: list[dict[str, Any]] = []
-    for recipe in content:
-        recipe_id = recipe.get("id")
-        if isinstance(recipe_id, int):
-            details.append(await client.get_recipe(auth_token, recipe_id, is_ingredient=False))
-
-    recipes_page["detailedContent"] = details
+    detail_tasks = [
+        client.get_recipe(auth_token, recipe["id"], is_ingredient=False)
+        for recipe in content
+        if isinstance(recipe, dict) and isinstance(recipe.get("id"), int)
+    ]
+    recipes_page["detailedContent"] = list(await asyncio.gather(*detail_tasks))
     return recipes_page
 
 
@@ -1598,6 +1597,18 @@ async def analyze_pump_ingredient_optimization(
     missing_by_recipe_id = current_eval["missingByRecipeId"]
     recipe_to_pump_usage = current_eval["recipeToPumpUsage"]
 
+    # Precompute which pumps match any requirement of each recipe once,
+    # instead of re-running the matching for every pump row.
+    matched_pump_ids_by_recipe_id: dict[int, set[int]] = {}
+    for recipe_id, requirements in requirements_by_recipe_id.items():
+        matched_pump_ids: set[int] = set()
+        for requirement in requirements:
+            for matched_pump in _matching_pumps_for_requirement(requirement, pump_entries):
+                matched_pump_id = _as_positive_int(matched_pump.get("pumpId"))
+                if matched_pump_id is not None:
+                    matched_pump_ids.add(matched_pump_id)
+        matched_pump_ids_by_recipe_id[recipe_id] = matched_pump_ids
+
     pump_usage_rows: list[dict[str, Any]] = []
     for pump in pump_entries:
         pump_id = _as_positive_int(pump.get("pumpId"))
@@ -1610,22 +1621,11 @@ async def analyze_pump_ingredient_optimization(
             if pump_id in recipe_to_pump_usage.get(recipe_id, set())
         )
 
-        recipes_using_pump_ids: list[int] = []
-        for recipe in filtered_recipes:
-            recipe_id = _as_positive_int(recipe.get("id"))
-            if recipe_id is None:
-                continue
-
-            requirements = requirements_by_recipe_id.get(recipe_id, [])
-            uses_pump = False
-            for requirement in requirements:
-                matching_pumps = _matching_pumps_for_requirement(requirement, pump_entries)
-                if any(_as_positive_int(p.get("pumpId")) == pump_id for p in matching_pumps):
-                    uses_pump = True
-                    break
-
-            if uses_pump:
-                recipes_using_pump_ids.append(recipe_id)
+        recipes_using_pump_ids = [
+            recipe_id
+            for recipe_id in sorted(matched_pump_ids_by_recipe_id)
+            if pump_id in matched_pump_ids_by_recipe_id[recipe_id]
+        ]
 
         pump_usage_rows.append(
             {
@@ -1684,8 +1684,6 @@ async def analyze_pump_ingredient_optimization(
     best_new_unlock_count = -1
 
     for pump_index, existing_pump in enumerate(pump_entries):
-        simulated_base = [dict(pump) for pump in pump_entries]
-
         for candidate in candidate_ingredients:
             candidate_id = _as_positive_int(candidate.get("id"))
             if candidate_id is None:
@@ -1695,7 +1693,9 @@ async def analyze_pump_ingredient_optimization(
             if not isinstance(candidate_name, str) or not candidate_name.strip():
                 candidate_name = f"Ingredient #{candidate_id}"
 
-            simulated_pumps = [dict(pump) for pump in simulated_base]
+            # Evaluation only reads pump entries, so a shallow copy of the list
+            # with one slot swapped out is sufficient.
+            simulated_pumps = list(pump_entries)
             simulated_pumps[pump_index] = {
                 "pumpId": existing_pump.get("pumpId"),
                 "pumpName": existing_pump.get("pumpName"),
@@ -2174,14 +2174,14 @@ async def analyze_current_pump_contributions(
             if not isinstance(candidate_ingredient, dict):
                 continue
 
-            simulated_entries = [dict(entry) for entry in without_pump_entries]
-            simulated_entries.append(
+            simulated_entries = [
+                *without_pump_entries,
                 _build_simulated_pump_entry(
                     pump_id=pump_id,
                     ingredient=candidate_ingredient,
                     ingredient_group_ids=ingredient_group_ids,
-                )
-            )
+                ),
+            ]
 
             trial_eval = _evaluate_recipes_against_pumps(
                 filtered_recipes,
