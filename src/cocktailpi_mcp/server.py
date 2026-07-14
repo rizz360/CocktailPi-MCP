@@ -222,6 +222,56 @@ def _resolve_token(explicit_token: str | None) -> str:
     return token
 
 
+def _coerce_production_steps_to_write_shape(production_steps: list[Any]) -> list[dict[str, Any]]:
+    """Convert productionSteps from the detail-response shape to the write shape.
+
+    Responses nest a full ingredient object per step ingredient, but create/update
+    payloads require flat ingredientId (+ ingredientType) fields; sending the
+    response shape back makes the backend reject the update with
+    'Ingredient with Id "0" doesn't exist!'.
+    """
+    steps: list[dict[str, Any]] = []
+    for step in production_steps:
+        if not isinstance(step, dict):
+            continue
+
+        step_type = step.get("type")
+        if step_type == "writtenInstruction":
+            steps.append({"type": step_type, "message": step.get("message") or ""})
+            continue
+
+        raw_step_ingredients = step.get("stepIngredients")
+        step_ingredients: list[dict[str, Any]] = []
+        if isinstance(raw_step_ingredients, list):
+            for step_ingredient in raw_step_ingredients:
+                if not isinstance(step_ingredient, dict):
+                    continue
+
+                ingredient_id = _as_positive_int(step_ingredient.get("ingredientId"))
+                nested_ingredient = step_ingredient.get("ingredient")
+                if ingredient_id is None and isinstance(nested_ingredient, dict):
+                    ingredient_id = _as_positive_int(nested_ingredient.get("id"))
+                if ingredient_id is None:
+                    continue
+
+                ingredient_type = step_ingredient.get("ingredientType")
+                if not isinstance(ingredient_type, str) and isinstance(nested_ingredient, dict):
+                    ingredient_type = nested_ingredient.get("type")
+
+                flat: dict[str, Any] = {
+                    "ingredientId": ingredient_id,
+                    "amount": step_ingredient.get("amount"),
+                    "scale": bool(step_ingredient.get("scale")),
+                    "boostable": bool(step_ingredient.get("boostable")),
+                }
+                if isinstance(ingredient_type, str) and ingredient_type.strip():
+                    flat["ingredientType"] = ingredient_type
+                step_ingredients.append(flat)
+
+        steps.append({"type": step_type or "addIngredients", "stepIngredients": step_ingredients})
+    return steps
+
+
 def _coerce_recipe_to_write_payload(recipe_detail: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
 
@@ -250,7 +300,7 @@ def _coerce_recipe_to_write_payload(recipe_detail: dict[str, Any]) -> dict[str, 
 
     production_steps = recipe_detail.get("productionSteps")
     if isinstance(production_steps, list):
-        payload["productionSteps"] = production_steps
+        payload["productionSteps"] = _coerce_production_steps_to_write_shape(production_steps)
 
     description = recipe_detail.get("description")
     if isinstance(description, str):
