@@ -4,6 +4,7 @@ import asyncio
 import base64
 import binascii
 import json
+import time
 from typing import Any
 
 import cairosvg
@@ -16,18 +17,12 @@ from cocktailpi_mcp.config import load_settings
 settings = load_settings()
 client = CocktailPiClient(settings.base_url, settings.timeout_seconds)
 
-# Resolved at startup: either the static token or one obtained via auto-login.
-_resolved_token: str | None = settings.access_token
+# Cache for tokens obtained via credential auto-login. A static
+# COCKTAILPI_ACCESS_TOKEN always takes precedence and is used as-is.
+_auto_login_token: str | None = None
+_auto_login_lock = asyncio.Lock()
 
-
-async def _auto_login() -> None:
-    """If no static token is configured but credentials are, perform login once."""
-    global _resolved_token
-    if _resolved_token:
-        return
-    if settings.username and settings.password:
-        result = await client.login(username=settings.username, password=settings.password)
-        _resolved_token = result.access_token
+TOKEN_EXPIRY_MARGIN_SECONDS = 60
 
 
 mcp = FastMCP(
@@ -212,14 +207,40 @@ def _validate_owner_assignment(
         )
 
 
-def _resolve_token(explicit_token: str | None) -> str:
-    token = (explicit_token or _resolved_token or "").strip()
-    if not token:
-        raise CocktailPiApiError(
-            "No access token available. Call login, set COCKTAILPI_ACCESS_TOKEN, "
-            "or set COCKTAILPI_USERNAME + COCKTAILPI_PASSWORD."
-        )
-    return token
+def _token_is_usable(token: str) -> bool:
+    exp = _decode_jwt_payload(token).get("exp")
+    if isinstance(exp, (int, float)):
+        return time.time() < exp - TOKEN_EXPIRY_MARGIN_SECONDS
+    # Tokens without a readable exp claim are assumed valid.
+    return True
+
+
+async def _resolve_token(explicit_token: str | None) -> str:
+    global _auto_login_token
+
+    token = (explicit_token or "").strip()
+    if token:
+        return token
+
+    if settings.access_token:
+        return settings.access_token
+
+    if settings.username and settings.password:
+        cached = _auto_login_token
+        if cached and _token_is_usable(cached):
+            return cached
+        async with _auto_login_lock:
+            cached = _auto_login_token
+            if cached and _token_is_usable(cached):
+                return cached
+            result = await client.login(username=settings.username, password=settings.password)
+            _auto_login_token = result.access_token
+            return _auto_login_token
+
+    raise CocktailPiApiError(
+        "No access token available. Call login, set COCKTAILPI_ACCESS_TOKEN, "
+        "or set COCKTAILPI_USERNAME + COCKTAILPI_PASSWORD."
+    )
 
 
 def _coerce_production_steps_to_write_shape(production_steps: list[Any]) -> list[dict[str, Any]]:
@@ -1134,7 +1155,7 @@ async def list_recipes(
     order_by: str = "name",
     include_details: bool = False,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     recipes_page = await client.list_recipes(
         auth_token,
         page=page,
@@ -1169,7 +1190,7 @@ async def get_recipe(
     token: str | None = None,
     is_ingredient_recipe: bool = False,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     return await client.get_recipe(auth_token, recipe_id, is_ingredient=is_ingredient_recipe)
 
 
@@ -1195,7 +1216,7 @@ async def create_recipe(
     image_filename: str = "recipe.jpg",
     image_content_type: str = "image/jpeg",
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     normalized_recipe = _normalize_recipe_owner_for_write(auth_token, recipe_json)
     result = await client.create_recipe(
         auth_token,
@@ -1230,7 +1251,7 @@ async def update_recipe(
     image_filename: str = "recipe.jpg",
     image_content_type: str = "image/jpeg",
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     normalized_recipe = _normalize_recipe_owner_for_write(auth_token, recipe_json)
     result = await client.update_recipe(
         auth_token,
@@ -1265,7 +1286,7 @@ async def add_or_update_recipe_image(
     image_filename: str = "recipe.jpg",
     image_content_type: str = "image/jpeg",
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     if not image_base64:
         raise CocktailPiApiError("image_base64 is required")
     payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
@@ -1298,7 +1319,7 @@ async def delete_recipe_image(
     recipe_json: dict[str, Any] | None = None,
     token: str | None = None,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
     return await client.delete_recipe_image(
         auth_token,
@@ -1322,7 +1343,7 @@ async def add_or_update_recipe_image_from_url(
     token: str | None = None,
     image_filename: str = "recipe-from-url",
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
     image_bytes, image_content_type = await _download_image_bytes(image_url)
     result = await client.add_or_update_recipe_image_bytes(
@@ -1359,7 +1380,7 @@ async def add_or_update_recipe_image_from_svg(
     output_height: int | None = 680,
     image_filename: str = "recipe-from-svg.png",
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     payload = await _resolve_recipe_payload_for_image_update(auth_token, recipe_id, recipe_json)
 
     if not svg_text.strip():
@@ -1393,13 +1414,13 @@ async def add_or_update_recipe_image_from_svg(
 
 @mcp.tool(description=f"Delete a CocktailPi recipe by id. {TOKEN_HELP}")
 async def delete_recipe(recipe_id: int, token: str | None = None) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     return await client.delete_recipe(auth_token, recipe_id)
 
 
 @mcp.tool(description=f"List pumps and their currently configured ingredients. {TOKEN_HELP}")
 async def list_pumps(token: str | None = None) -> list[dict[str, Any]]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     pumps = await client.list_pumps(auth_token)
 
     normalized: list[dict[str, Any]] = []
@@ -1430,7 +1451,7 @@ async def list_ingredients(
     autocomplete: str | None = None,
     in_bar_or_on_pump: bool = True,
 ) -> list[dict[str, Any]]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     return await client.list_ingredients(
         auth_token,
         autocomplete=autocomplete,
@@ -1451,7 +1472,7 @@ async def set_ingredient_in_bar(
     in_bar: bool,
     token: str | None = None,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     return await client.set_ingredient_in_bar(auth_token, ingredient_id=ingredient_id, in_bar=in_bar)
 
 
@@ -1468,7 +1489,7 @@ async def set_ingredients_in_bar(
     in_bar: bool,
     token: str | None = None,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     unique_ids = sorted({ingredient_id for ingredient_id in ingredient_ids if isinstance(ingredient_id, int)})
     if not unique_ids:
         raise CocktailPiApiError("ingredient_ids must contain at least one integer id")
@@ -1489,13 +1510,13 @@ async def set_ingredients_in_bar(
 
 @mcp.tool(description=f"List recipe categories. {TOKEN_HELP}")
 async def list_categories(token: str | None = None) -> list[dict[str, Any]]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     return await client.list_categories(auth_token)
 
 
 @mcp.tool(description=f"List glasses. {TOKEN_HELP}")
 async def list_glasses(token: str | None = None) -> list[dict[str, Any]]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
     return await client.list_glasses(auth_token)
 
 
@@ -1521,7 +1542,7 @@ async def analyze_pump_ingredient_optimization(
     expected_total_recipes: int | None = None,
     optimize_pump_slots: int | None = None,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
 
     pumps_task = client.list_pumps(auth_token)
     ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=False)
@@ -1842,7 +1863,7 @@ async def suggest_optimal_pump_configuration(
     expected_total_recipes: int | None = None,
     include_blocked_recipes: bool = False,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
 
     pumps_task = client.list_pumps(auth_token)
     ingredients_task = client.list_ingredients(auth_token, in_bar_or_on_pump=False)
@@ -2033,7 +2054,7 @@ async def analyze_current_pump_contributions(
     expected_total_recipes: int | None = None,
     include_recipe_names: bool = True,
 ) -> dict[str, Any]:
-    auth_token = _resolve_token(token)
+    auth_token = await _resolve_token(token)
 
     if least_pumps_to_explain < 1:
         raise CocktailPiApiError("least_pumps_to_explain must be >= 1")
@@ -2268,5 +2289,4 @@ async def analyze_current_pump_contributions(
 
 
 def run() -> None:
-    asyncio.run(_auto_login())
     mcp.run(transport="stdio")

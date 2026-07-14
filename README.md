@@ -103,7 +103,7 @@ Image notes:
 
 Auth behavior notes:
 - Every tool's `token` parameter is optional.
-- If `token` is omitted, the MCP server automatically falls back to configured `COCKTAILPI_ACCESS_TOKEN` or startup auto-login token.
+- If `token` is omitted, the MCP server automatically falls back to configured `COCKTAILPI_ACCESS_TOKEN` or an automatic credential login (renewed when the token expires).
 - Call `login` only if you need to fetch/refresh a token explicitly.
 
 Minimal `create_recipe` payload pattern:
